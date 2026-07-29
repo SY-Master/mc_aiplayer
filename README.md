@@ -28,9 +28,9 @@
 
 ## What AIBot is
 
-AIBot is an open-source server-side [Fabric](https://fabricmc.net/) mod for Minecraft 1.21.3. It creates a real server-side player, accepts natural-language instructions, and maps them onto deterministic game logic for mining, crafting, smelting, building, farming, combat, fishing, trading, storage, and survival.
+AIBot is an open-source server-side [Fabric](https://fabricmc.net/) mod for Minecraft 1.21.3. It creates a real server-side player, accepts natural-language instructions through **conversation** (not commands), and maps them onto deterministic game logic for mining, crafting, smelting, building, farming, combat, fishing, trading, storage, and survival.
 
-The model is not allowed to improvise per-tick movement or edit the world directly. It chooses from a registry of **63 tools**; the goal engine and **34 concrete Task state machines** own execution. The codebase currently contains **9 typed Goal variants**, **197 main Java classes**, and about **32K lines of main Java**.
+The model is not allowed to improvise per-tick movement or edit the world directly. It chooses from a registry of **63 tools**; the goal engine and **34 concrete Task state machines** own execution. The codebase currently contains **9 typed Goal variants**, **197 main Java classes**, and about **32K lines of main Java**. New capabilities include a **SkillBook** for composable skill definitions, **short-term and long-term memory** with LLM-accessible Tool interfaces, and **context persistence** for seamless session recovery across restarts.
 
 This is an active engineering project, not a claim that every goal succeeds on every terrain. Long navigation, deep mining, large stockpiles, and full structure completion still need broader clean-commit, multi-seed evidence.
 
@@ -51,7 +51,9 @@ See [Operating profiles](docs/OPERATING_PROFILES.md) for the full matrix and mig
 
 ```mermaid
 flowchart TB
-    U["Player: chat, command, or Bob panel"] --> B["Brain: OpenAI-compatible tool calls"]
+    U["Player: chat conversation with Bob"] --> B["Brain: OpenAI-compatible tool calls"]
+    B --> M["Memory: short-term working memory + long-term persistent memory"]
+    M --> B
     B --> G["Typed Goal + GoalPlanner"]
     G --> E["GoalExecutor + postcondition"]
     E --> T["34 deterministic Task state machines"]
@@ -59,12 +61,18 @@ flowchart TB
     A --> W["Minecraft server world"]
     W --> P["Visible perception"]
     P --> B
-    S["Safety, pause/resume, authorization, lifecycle"] -. guards .-> E
-    S -. guards .-> T
+    S["SkillBook: composable skill definitions"] -. registers .-> B
+    S -. registers .-> G
+    K["Context persistence"] -. restores .-> B
+    K -. restores .-> M
+    S2["Safety, pause/resume, authorization, lifecycle"] -. guards .-> E
+    S2 -. guards .-> T
     R["Versioned runtime snapshot"] -. restores .-> E
 ```
 
 The nine Goal variants cover item acquisition, pickaxe tiers, ore, crops, armor, workstations, stockpiles, food, and blueprint builds. Goal completion is evaluated as a typed postcondition, so a Task ending is not automatically treated as mission success.
+
+**New in development:** Short-term memory maintains perception summaries and current sub-goals within a decision session to reduce redundant LLM calls. Long-term memory persists owner preferences, base locations, explored areas, and task history across sessions via LLM-accessible Tool interfaces (`remember`/`recall`/`forget`). The SkillBook defines composable capability units (Tool schema + Preconditions + Planner + Task factory + Postcondition), replacing ad-hoc Tool registration.
 
 Runtime control supports cancel/replace and nested pause/resume. Bot, mission, checkpoint, and shared-job state is written through a versioned atomic snapshot. Restart restoration reopens stale job leases instead of trusting an old process owner.
 
@@ -137,16 +145,31 @@ Any OpenAI-compatible chat/tool-calling endpoint can be used by changing `baseUr
 
 ## Usage
 
-```mcfunction
-/aibot spawn Bob
-/aibot list
-/aibot brain say Bob mine 3 diamonds
-/aibot task assign Bob mine minecraft:stone 16
-/aibot task status Bob
-/aibot brain status Bob
+The **preferred way** to interact with AIBot is through natural-language conversation in the chat message list. Spawn a bot and talk to it directly — no commands needed for most tasks.
+
+### Conversation (recommended)
+
+```
+<you> Bob, mine 3 diamonds for me
+<Bob> Got it. Heading underground to find diamond ore. I'll keep you posted.
+
+<you> Bob, craft an iron pickaxe and come to me
+<Bob> I have 2 iron ingots, need 1 more. Let me smelt some raw iron first.
 ```
 
-Press **`Alt + 0`** to open the Bob panel. It shows health, hunger, current work, model usage, inventory, operating profile, and effective privileged capabilities. Manual teleport controls are disabled unless `MANUAL_TELEPORT` is effective.
+Bob reports progress, asks for clarification, and surfaces problems in the same chat channel.
+
+### Commands (for administration only)
+
+A minimal set of administrative commands is kept for lifecycle management; everything else is handled through conversation:
+
+```mcfunction
+/aibot spawn Bob              # Create a bot (can also be done via conversation)
+/aibot despawn Bob            # Remove a bot
+/aibot list                   # List active bots
+```
+
+The `Alt + 0` client UI panel is being phased out. All information (health, hunger, inventory summary, current task, model usage) is moving into the chat message list. Manual teleport controls are disabled unless `MANUAL_TELEPORT` is effective.
 
 Commands, panel/network actions, chat routing, tools, and shared jobs pass through owner/operator authorization checks. Run AIBot only on servers where the owner has approved the selected profile and capabilities.
 
@@ -187,11 +210,13 @@ bash scripts/evidence_validate.sh --require-verified artifacts/evidence/<run-id>
 src/main/java/io/github/zoyluo/aibot
 ├── action/        # movement, mining, interaction, inventory, building
 ├── brain/         # LLM requests, tools, authorization-aware dispatch
-├── command/       # production /aibot commands
+├── command/       # production /aibot commands (being slimmed down)
 ├── coordination/  # shared jobs and idle coordination
 ├── goal/          # typed goals, planner, executor, postconditions
+├── memory/        # short-term working memory + long-term persistent memory (new)
 ├── mode/          # strict/operator capability policy
 ├── persist/       # versioned runtime snapshot and atomic storage
+├── skill/         # skill book: composable Skill definitions (new)
 ├── task/          # deterministic Task state machines and safety layers
 └── …              # entity · mining · network · observe · pathfinding
 

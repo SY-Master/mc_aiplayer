@@ -35,6 +35,21 @@ LLM 理解意图
 
 不让 LLM 进入逐 tick 执行回路，也不以继续增加 Tool 数量作为主要进度指标。
 
+## 2.1 交互模型转型（新战略方向）
+
+当前交互以 `/aibot` 指令和 `Alt+0` 客户端 UI 面板为主。下一阶段将逐步转型为**纯对话式交互**：
+
+1. **逐步废弃客户端 UI**：当前 Bob 面板（`Alt+0`）提供的生命、饥饿、背包、任务进度等信息，将全部迁移到聊天消息列表（`/msg Bob` 或聊天栏 @Bot 对话）中呈现，不再依赖客户端模组 UI。
+2. **逐步废弃大部分指令**：`/aibot spawn/list/task/brain` 等命令将逐步替换为自然语言对话（如 "Bob，过来帮我挖矿"），只保留少量必要的管理命令。
+3. **长期记忆管理**：Bot 将具备跨会话的长期记忆能力，预期通过 LLM Tool 实现存储和检索。Bot 能记住 owner 偏好、基地位置、历史任务和已探索区域等信息。
+4. **短期记忆管理**：在单次决策会话内维护工作记忆（最近感知、当前子目标、已尝试方案等），避免重复规划和工具调用。
+5. **上下文持久化**：Bot 的对话上下文、当前任务状态和感知快照在服务端重启后完整恢复，实现"无缝续接"的对话体验。
+6. **技能书**：引入可组合的技能/能力定义（Skill Book），每个技能包含 Tool schema、前置条件、Planner 展开、Task 工厂和后置条件，使 Bot 能力可审计、可组合、可扩展。
+
+这些能力将作为 v0.1 的并行轨道逐步交付，不影响现有确定性 Task 执行层的稳定性。
+
+---
+
 需要明确区分两种运行策略：
 
 | 模式 | 定位 | 隐藏资源扫描 | 紧急传送 | 适用场景 |
@@ -69,7 +84,10 @@ BotRuntime
 ├── ExecutionStack
 ├── SafetyArbiter
 ├── WorldModel(dimension-aware)
-├── Memory
+├── ShortTermMemory         ← 新增：单次会话工作记忆（最近感知、当前子目标、已尝试方案）
+├── LongTermMemory          ← 新增：跨会话持久记忆（owner 偏好、基地位置、探索历史），通过 Tool 暴露
+├── ContextPersistence      ← 新增：对话上下文/感知快照重启恢复
+├── SkillBook               ← 新增：可组合技能定义（Tool + Preconditions + Planner + Task + Postcondition）
 └── EventLog(correlation id)
 ```
 
@@ -136,6 +154,25 @@ Capability
 - Nether 与跨维度 WorldModel；
 - 单 Bot Runtime 稳定后再启用多 Bot 分工、租约和资源预留。
 
+### v0.4：对话式智能体体验
+
+将 AIBot 从"命令驱动的工具"转型为"可对话的协作伙伴"。
+
+**交互层**
+- 废弃 `Alt+0` 客户端 UI 面板，所有信息通过聊天消息列表（`/msg`、聊天栏 @Bot）呈现；
+- 废弃大部分 `/aibot` 子命令，只保留少量必要管理命令（如 `spawn`/`despawn`），其余全部通过自然语言对话触发；
+- Bot 主动汇报进度、异常和需要决策的事项，而非等待轮询。
+
+**记忆系统**
+- 短期记忆：在单次 DecisionSession 内维护感知摘要、当前子目标、已尝试方案及其结果，避免 LLM 重复规划和工具调用；
+- 长期记忆：通过 LLM Tool 接口实现 `remember`/`recall`/`forget`，跨会话持久化存储 owner 偏好、基地坐标、已探索区域、历史任务经验等结构化记忆；
+- 上下文持久化：DecisionSession 上下文、WorldModel 感知快照随 Mission 一起持久化，服务端重启后完整恢复，实现"无缝续接"对话体验。
+
+**技能书**
+- 定义 `Skill` 为一等公民抽象：`Tool schema + Preconditions + Planner expansion + Task factory + Postcondition + Verification scenarios`；
+- 支持技能发现（Bot 可查询自己会什么）、技能组合（复杂任务由多个 Skill 编排）和技能热加载；
+- 现有 63 个 Tool 和 34 个 Task 逐步迁移为 Skill 注册模式。
+
 ## 6. 工程门禁
 
 每次合入必须满足对应层级：
@@ -159,19 +196,28 @@ Capability
 
 ## 7. 非目标
 
-在 v0.1 前明确不做：
-
-- 端到端 LLM 或 RL 取代确定性 Task；
-- 为展示数量继续增加 Tool；
+- 端到端 LLM 或 RL 取代确定性 Task（LLM 始终负责意图理解，Task 状态机始终负责执行）；
+- 为展示数量继续增加 Tool（优先通过 Skill 组合实现复杂能力，而非堆砌原子 Tool）；
 - 未定义 lease/recovery 的多 Bot 编排；
 - 同时支持多个 Minecraft 大版本；
-- 没有验收标准的 UI 大改版。
+- UI 面板向消息列表的迁移必须有验收标准（信息完整度、可读性、延迟），不允许无标准退化。
 
 ## 8. 下一检查点
 
-P0 已完成，下一步进入 v0.1 可靠性收敛：
+P0 已完成，当前双轨并行：
+
+**轨道 A — v0.1 可靠性收敛：**
 
 1. 用户授权提交后，让 clean CI 生成首批 `VERIFIED` evidence，并通过 `pin_baseline.sh` 显式更新 `reports/baselines/index.tsv`；
-2. 对四条黄金链各跑至少 20 个公开 seed，先选择“铁装备”或“简单建房”中的一条收敛到 `>= 90%`；
+2. 对四条黄金链各跑至少 20 个公开 seed，先选择”铁装备”或”简单建房”中的一条收敛到 `>= 90%`；
 3. 将真实失败按 stage 聚类，只修最高频根因，不扩大 Goal/Tool 数量；
 4. 以 strict 为发布口径，operator 作为单独可审计的服务器自动化模式持续回归。
+
+**轨道 B — v0.4 对话式体验：**
+
+1. 设计并实现 LongTermMemory Tool 接口（`remember`/`recall`/`forget`），选定存储后端；
+2. 实现 ShortTermMemory 工作记忆，接入 DecisionSession 生命周期；
+3. 实现 ContextPersistence，将对话上下文和感知快照纳入持久化 schema；
+4. 定义 Skill 抽象和 SkillBook 注册机制，将 1-2 个现有 Task 迁移为 Skill 验证模式；
+5. 将 Bot 状态信息（生命、饥饿、背包摘要、当前任务）迁移到聊天消息通道，开始逐步移除客户端 UI 面板元素；
+6. 梳理现有 `/aibot` 命令，标记保留/废弃/对话化，开始向自然语言意图路由迁移。

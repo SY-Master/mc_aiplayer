@@ -28,9 +28,9 @@
 
 ## AIBot 是什么
 
-AIBot 是一个面向 Minecraft 1.21.3 的开源服务端 [Fabric](https://fabricmc.net/) 模组。它会生成真实的服务端玩家，接收自然语言指令，并把指令映射到挖矿、合成、熔炼、建造、种田、战斗、钓鱼、交易、存储和生存等确定性逻辑。
+AIBot 是一个面向 Minecraft 1.21.3 的开源服务端 [Fabric](https://fabricmc.net/) 模组。它会生成真实的服务端玩家，通过**对话**（而非命令）接收自然语言指令，并把指令映射到挖矿、合成、熔炼、建造、种田、战斗、钓鱼、交易、存储和生存等确定性逻辑。
 
-大模型不能随意生成每 tick 动作，也不能绕过执行层直接改世界。它从 **63 个已注册工具**中选择意图，Goal 引擎与 **34 个具体 Task 状态机**负责执行。目前主代码包含 **9 类带类型的 Goal**、**197 个 Java 类**，约 **32K 行主 Java 代码**。
+大模型不能随意生成每 tick 动作，也不能绕过执行层直接改世界。它从 **63 个已注册工具**中选择意图，Goal 引擎与 **34 个具体 Task 状态机**负责执行。目前主代码包含 **9 类带类型的 Goal**、**197 个 Java 类**，约 **32K 行主 Java 代码**。新能力包括：**技能书**（可组合技能定义）、**短期与长期记忆**（通过 LLM Tool 接口访问）和**上下文持久化**（跨重启无缝恢复会话）。
 
 这是一个仍在持续加固的工程项目，不代表所有目标在所有地形中都能稳定完成。长距离导航、深层挖矿、大批量囤货和完整结构验收，仍需要更多绑定干净 commit 的多种子证据。
 
@@ -51,7 +51,9 @@ AIBot 是一个面向 Minecraft 1.21.3 的开源服务端 [Fabric](https://fabri
 
 ```mermaid
 flowchart TB
-    U["玩家：聊天、命令或 Bob 面板"] --> B["Brain：OpenAI-compatible 工具调用"]
+    U["玩家：与 Bob 聊天对话"] --> B["Brain：OpenAI-compatible 工具调用"]
+    B --> M["Memory：短期工作记忆 + 长期持久记忆"]
+    M --> B
     B --> G["Typed Goal + GoalPlanner"]
     G --> E["GoalExecutor + 后置条件"]
     E --> T["34 个确定性 Task 状态机"]
@@ -59,12 +61,18 @@ flowchart TB
     A --> W["Minecraft 服务端世界"]
     W --> P["可见世界感知"]
     P --> B
-    S["安全、暂停恢复、权限、生命周期"] -. 守护 .-> E
-    S -. 守护 .-> T
+    S["SkillBook：可组合技能定义"] -. 注册 .-> B
+    S -. 注册 .-> G
+    K["上下文持久化"] -. 恢复 .-> B
+    K -. 恢复 .-> M
+    S2["安全、暂停恢复、权限、生命周期"] -. 守护 .-> E
+    S2 -. 守护 .-> T
     R["版本化运行时快照"] -. 恢复 .-> E
 ```
 
 9 类 Goal 覆盖物品获取、镐等级、矿石、作物、护甲、工作站、囤货、食物和蓝图建造。Goal 是否完成由带类型的后置条件判断，Task 结束不会自动等同于任务成功。
+
+**开发中新能力：**短期记忆在单次决策会话内维护感知摘要和当前子目标，减少重复 LLM 调用。长期记忆通过 LLM 可访问的 Tool 接口（`remember`/`recall`/`forget`）跨会话持久化 owner 偏好、基地坐标、探索区域和任务经验。技能书将能力定义为可组合单元（Tool schema + 前置条件 + Planner + Task 工厂 + 后置条件），替代零散的 Tool 注册。
 
 运行时支持 cancel/replace 与嵌套 pause/resume。Bot、Mission、checkpoint 和共享 Job 状态通过版本化原子快照写入；进程重启后会重新开放旧进程留下的过期 Job lease，而不是继续信任失效的 claimant。
 
@@ -135,18 +143,33 @@ export DEEPSEEK_API_KEY="sk-your-key"
 
 修改 `baseUrl` 与 `model` 即可连接其他 OpenAI-compatible 对话与工具调用接口。也可以用 `AIBOT_PROFILE=strict_survival` 或 `AIBOT_PROFILE=operator` 为单个进程覆盖配置文件。
 
-## 常用命令
+## 使用方式
 
-```mcfunction
-/aibot spawn Bob
-/aibot list
-/aibot brain say Bob 挖 3 颗钻石
-/aibot task assign Bob mine minecraft:stone 16
-/aibot task status Bob
-/aibot brain status Bob
+**推荐方式**是在聊天消息列表中通过自然语言对话与 AIBot 交互。生成 Bot 后直接对话即可，大部分操作无需输入命令。
+
+### 对话（推荐）
+
+```
+<你> Bob，帮我挖 3 颗钻石
+<Bob> 收到。正在前往地下寻找钻石矿，会随时汇报进度。
+
+<你> Bob，造一把铁镐然后过来找我
+<Bob> 我手上有 2 个铁锭，还需要 1 个。让我先烧一些粗铁。
 ```
 
-在游戏中按 **`Alt + 0`** 打开 Bob 控制面板。面板会展示生命、饥饿、当前任务、模型用量、背包、运行模式和最终生效的特权能力；只有 `MANUAL_TELEPORT` 生效时，手动传送控件才可用。
+Bob 会在同一聊天频道主动汇报进度、请求澄清和暴露问题。
+
+### 命令（仅用于管理）
+
+保留最小限度的管理命令用于生命周期控制，其余全部通过对话完成：
+
+```mcfunction
+/aibot spawn Bob              # 创建 Bot（也可通过对话触发）
+/aibot despawn Bob            # 移除 Bot
+/aibot list                   # 列出活跃 Bot
+```
+
+`Alt + 0` 客户端 UI 面板正在逐步废弃。所有信息（生命、饥饿、背包摘要、当前任务、模型用量）将迁移到聊天消息列表中。只有 `MANUAL_TELEPORT` 生效时，手动传送控件才可用。
 
 命令、面板/网络动作、聊天路由、工具和共享 Job 都经过 owner/operator 权限检查。请只在服主已批准当前 profile 与 capabilities 的服务器上使用。
 
@@ -187,11 +210,13 @@ bash scripts/evidence_validate.sh --require-verified artifacts/evidence/<run-id>
 src/main/java/io/github/zoyluo/aibot
 ├── action/        # 移动、挖掘、交互、背包、建造
 ├── brain/         # LLM 请求、工具、带权限的调度
-├── command/       # 生产环境 /aibot 命令
+├── command/       # 生产环境 /aibot 命令（正在精简）
 ├── coordination/  # 共享 Job 与空闲协调
 ├── goal/          # typed Goal、planner、executor、后置条件
+├── memory/        # 短期工作记忆 + 长期持久记忆（新增）
 ├── mode/          # strict/operator capability policy
 ├── persist/       # 版本化运行时快照与原子存储
+├── skill/         # 技能书：可组合 Skill 定义（新增）
 ├── task/          # 确定性 Task 状态机与安全层
 └── …              # entity · mining · network · observe · pathfinding
 

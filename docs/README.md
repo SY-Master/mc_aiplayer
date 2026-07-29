@@ -6,14 +6,15 @@
 - [测试与证据](TESTING_AND_EVIDENCE.md)：JUnit、GameTest、测试 harness、不可变 evidence bundle 与 baseline pin 流程。
 - [能力矩阵](CAPABILITY_MATRIX.md)：当前显式证据与 legacy 诊断的生成结果。
 - [P0 Runtime Hardening](P0_RUNTIME_HARDENING.md)：运行时加固阶段与验收项。
-- [产品与工程路线图](../ROADMAP.md)：后续可靠性和产品规划。
+- [产品与工程路线图](../ROADMAP.md)：后续可靠性、对话式交互转型、记忆系统、技能书和上下文持久化规划。
 
 ## 当前工程口径
 
 - 新安装默认 `strict_survival`；已有旧配置缺少 `profile` 时，才按 legacy compatibility 载入为 `operator` 并告警。
+- 交互方式正在从命令/UI 面板转型为**纯对话式**；`Alt+0` 客户端面板和大部分 `/aibot` 子命令将逐步废弃。
 - 生产 jar 不包含 `/aibot test`、`/aibot verify` 或 GameTest 实现。测试命令只通过 `src/gametest` 与 `runHarnessServer` 提供。
 - 本地 dirty-worktree run 可以用于诊断，但必须是 `UNVERIFIED`，不能作为发布结论。
-- 新式 `VERIFIED` 能力基线只能由 `reports/baselines/index.tsv` 显式选择，不能按“最好”或“最新”自动挑选。
+- 新式 `VERIFIED` 能力基线只能由 `reports/baselines/index.tsv` 显式选择，不能按”最好”或”最新”自动挑选。
 
 ## 能力矩阵的来源
 
