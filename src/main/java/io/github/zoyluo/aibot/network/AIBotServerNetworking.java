@@ -10,7 +10,6 @@ import io.github.zoyluo.aibot.manager.AIPlayerManager;
 import io.github.zoyluo.aibot.goal.GoalExecutor;
 import io.github.zoyluo.aibot.memory.BotMemory;
 import io.github.zoyluo.aibot.memory.BotMemoryStore;
-import io.github.zoyluo.aibot.network.payload.BotChatS2C;
 import io.github.zoyluo.aibot.network.payload.BotCommandC2S;
 import io.github.zoyluo.aibot.network.payload.BotItemMoveC2S;
 import io.github.zoyluo.aibot.network.payload.BotTeleportC2S;
@@ -106,26 +105,10 @@ public final class AIBotServerNetworking {
     }
 
     public void sendBotChat(AIPlayerEntity bot, String role, String text) {
-        if (subscriptions.isEmpty()) {
-            return;
-        }
-        for (Map.Entry<UUID, UUID> entry : subscriptions.entrySet()) {
-            if (!bot.getUuid().equals(entry.getValue())) {
-                continue;
-            }
-            ServerPlayerEntity viewer = bot.getServer().getPlayerManager().getPlayer(entry.getKey());
-            if (viewer == null) {
-                subscriptions.remove(entry.getKey(), entry.getValue());
-                continue;
-            }
-            if (!BotAuthorizationGate.INSTANCE.authorize(
-                    viewer, bot, BotAuthorizationPolicy.Operation.VIEW, "network:chat_push")) {
-                subscriptions.remove(entry.getKey(), entry.getValue());
-                continue;
-            }
-            if (ServerPlayNetworking.canSend(viewer, BotChatS2C.ID)) {
-                ServerPlayNetworking.send(viewer, new BotChatS2C(bot.getGameProfile().getName(), role, text));
-            }
+        var botName = bot.getGameProfile().getName();
+        var message = net.minecraft.text.Text.literal("<" + botName + "> " + text);
+        for (ServerPlayerEntity player : bot.getServer().getPlayerManager().getPlayerList()) {
+            player.sendMessage(message);
         }
     }
 
@@ -422,9 +405,8 @@ public final class AIBotServerNetworking {
     }
 
     private void sendSystem(ServerPlayerEntity player, String botName, String text) {
-        if (ServerPlayNetworking.canSend(player, BotChatS2C.ID)) {
-            ServerPlayNetworking.send(player, new BotChatS2C(botName, "system", text));
-        }
+        var prefix = botName.isEmpty() ? "" : "[" + botName + "] ";
+        player.sendMessage(net.minecraft.text.Text.literal(prefix + text));
     }
 
     private static int count(BotCommandC2S payload) {
