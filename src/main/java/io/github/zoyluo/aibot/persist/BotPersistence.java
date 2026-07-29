@@ -2,6 +2,7 @@ package io.github.zoyluo.aibot.persist;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import io.github.zoyluo.aibot.brain.BrainCoordinator;
 import io.github.zoyluo.aibot.coordination.Job;
 import io.github.zoyluo.aibot.coordination.TaskBoard;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
@@ -171,12 +172,13 @@ public final class BotPersistence {
             Optional<AIPlayerEntity> bot = AIPlayerManager.INSTANCE.respawnFromRecord(server, persisted.bot());
             if (bot.isPresent()) {
                 restored++;
-                missions.add(new RestoredMission(bot.get(), persisted.missions()));
+                missions.add(new RestoredMission(bot.get(), persisted.missions(), persisted.conversation()));
             }
         }
         TaskBoard.INSTANCE.replaceAll(migrateJobs(snapshot.jobs()));
         for (RestoredMission restoredMission : missions) {
             GoalExecutor.INSTANCE.restoreRuntime(restoredMission.bot(), restoredMission.missions());
+            BrainCoordinator.INSTANCE.restoreConversation(restoredMission.bot(), restoredMission.conversation());
         }
         if (outcome.legacyMigrated() && !readOnlyDueToLoadFailure) {
             saveAll(server);
@@ -228,7 +230,10 @@ public final class BotPersistence {
     private RuntimeSnapshot captureSnapshot() {
         List<PersistedBot> bots = new ArrayList<>();
         for (AIPlayerEntity bot : AIPlayerManager.INSTANCE.all()) {
-            bots.add(new PersistedBot(capture(bot), GoalExecutor.INSTANCE.captureRuntime(bot)));
+            bots.add(new PersistedBot(
+                    capture(bot),
+                    GoalExecutor.INSTANCE.captureRuntime(bot),
+                    BrainCoordinator.INSTANCE.captureConversation(bot)));
         }
         return new RuntimeSnapshot(
                 RuntimeSnapshot.CURRENT_SCHEMA,
@@ -282,7 +287,7 @@ public final class BotPersistence {
                 BotRecord[] records = GSON.fromJson(reader, BotRecord[].class);
                 if (records != null) {
                     for (BotRecord record : records) {
-                        bots.add(new PersistedBot(record, MissionRuntimeRecord.empty()));
+                        bots.add(new PersistedBot(record, MissionRuntimeRecord.empty(), ConversationRecord.empty()));
                     }
                 }
             } catch (IOException | RuntimeException exception) {
@@ -407,6 +412,6 @@ public final class BotPersistence {
     private record LoadOutcome(RuntimeSnapshot snapshot, boolean legacyMigrated) {
     }
 
-    private record RestoredMission(AIPlayerEntity bot, MissionRuntimeRecord missions) {
+    private record RestoredMission(AIPlayerEntity bot, MissionRuntimeRecord missions, ConversationRecord conversation) {
     }
 }

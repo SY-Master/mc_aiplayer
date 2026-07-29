@@ -9,6 +9,10 @@ public record ChatMessage(
         String toolCallId,
         String name
 ) {
+    public ChatMessage {
+        toolCalls = toolCalls == null ? List.of() : List.copyOf(toolCalls);
+    }
+
     public static ChatMessage system(String content) {
         return new ChatMessage("system", content, List.of(), null, null);
     }

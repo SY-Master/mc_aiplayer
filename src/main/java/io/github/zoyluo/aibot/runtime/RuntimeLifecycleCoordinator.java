@@ -80,7 +80,7 @@ public final class RuntimeLifecycleCoordinator {
         IdleCoordinator.INSTANCE.cancelClaimedJob(bot, "bot_died");
         TaskManager.INSTANCE.cancelIntentTasks(bot, "bot_died");
         bot.getActionPack().stopAll();
-        BrainCoordinator.INSTANCE.reset(bot);
+        BrainCoordinator.INSTANCE.softReset(bot);
         clearTransient(bot);
         BotLog.lifecycle(bot, "bot_runtime_death_reset");
     }

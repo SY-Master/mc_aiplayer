@@ -10,6 +10,7 @@ import io.github.zoyluo.aibot.observe.TpsGuard;
 import io.github.zoyluo.aibot.network.AIBotServerNetworking;
 import io.github.zoyluo.aibot.perception.PerceptionCollector;
 import io.github.zoyluo.aibot.perception.PerceptionSnapshot;
+import io.github.zoyluo.aibot.persist.ConversationRecord;
 import io.github.zoyluo.aibot.task.MemoryStore;
 import io.github.zoyluo.aibot.task.TaskManager;
 import io.github.zoyluo.aibot.task.TaskStatus;
@@ -347,6 +348,56 @@ public final class BrainCoordinator {
         AIBotServerNetworking.INSTANCE.sendBotChat(bot, role, text);
     }
 
+    /** Snapshots the conversation history for persistence. Transient decision-flow state is not captured. */
+    public ConversationRecord captureConversation(AIPlayerEntity bot) {
+        BotConversation conv = conversations.get(bot.getUuid());
+        if (conv == null || conv.history.isEmpty()) {
+            return ConversationRecord.empty();
+        }
+        int max = AIBotConfig.get().brain().maxHistoryMessages();
+        List<ChatMessage> messages = new ArrayList<>(conv.history);
+        if (messages.size() > max) {
+            int keep = max;
+            int offset = 0;
+            if (!messages.isEmpty() && "system".equals(messages.get(0).role())) {
+                keep--;
+                offset = 1;
+            }
+            int from = Math.max(offset, messages.size() - keep);
+            List<ChatMessage> trimmed = new ArrayList<>(messages.subList(0, offset));
+            trimmed.addAll(messages.subList(from, messages.size()));
+            messages = trimmed;
+        }
+        return new ConversationRecord(List.copyOf(messages), conv.lastGoalResultSequence);
+    }
+
+    /** Restores a previously persisted conversation. No-op if the bot already has live conversation state. */
+    public void restoreConversation(AIPlayerEntity bot, ConversationRecord record) {
+        if (record == null || record.isEmpty()) {
+            return;
+        }
+        BotConversation conv = conversations.computeIfAbsent(bot.getUuid(), BotConversation::new);
+        if (!conv.history.isEmpty()) {
+            return;
+        }
+        conv.history.addAll(record.history());
+        conv.lastGoalResultSequence = record.lastGoalResultSequence();
+        conv.turnsInCurrentRequest = 0;
+        conv.continuationTaskPolls = 0;
+        conv.maxTurnsHintInjected = false;
+    }
+
+    /** Invalidates the in-flight decision and clears wake state without discarding conversation history.
+     *  Used on bot death so the bot remembers what it was doing after respawn. */
+    public void softReset(AIPlayerEntity bot) {
+        BotConversation conv = conversations.get(bot.getUuid());
+        if (conv != null) {
+            conv.decision.invalidate();
+        }
+        awaitingTask.remove(bot.getUuid());
+        nextGoalWakeTick.remove(bot.getUuid());
+    }
+
     public int conversationCount() {
         return conversations.size();
     }
@@ -640,6 +691,8 @@ public final class BrainCoordinator {
                 10. After each action, look at the next world state (passed in user messages) and decide the next step.
                 11. When the task is complete or impossible, say so and stop calling tools.
                 12. You are fully autonomous and self-reliant. NEVER ask the human for help, for resources, or to move/carry you — the human will not help. NEVER mine ore with bare hands and NEVER use strip_mine or assign_task mine to dig without a proper pickaxe (that wastes blocks and drops nothing). To get ore always use mine_ore, and to get an item/tool use achieve_goal — these automatically walk to find wood, craft the needed pickaxe, then mine. If mine_ore/achieve_goal reports it cannot proceed, just retry the SAME mine_ore once (do NOT switch to an easier or different goal such as achieve_goal a pickaxe — mine_ore already auto-prepares the pickaxe, so switching only loses the real goal); if it still cannot, state the situation in one short sentence and stop — do not flail with move/strip_mine and do not beg.
+                13. EFFICIENCY CHECK FOR GATHERING: Before executing any block-gathering task (e.g., chopping trees, mining), you MUST evaluate efficiency based on current state. Priority logic: Check Inventory > Check Tool Tier > Decide Action. Example for wood: Do I have an axe? > Is it stone/iron/diamond tier? > If no axe or only wooden axe while better materials are available, prioritize upgrading the tool via achieve_goal BEFORE mass gathering. Never perform repetitive gathering with bare hands or suboptimal tools when an upgrade path exists.
+                14. BIOME AWARENESS & CONFIRMATION: Before gathering biome-specific resources (especially logs/wood), check the current biome from world state. If the current biome lacks the target resource naturally (e.g., Desert, Ocean, Deep Ocean for trees), DO NOT start searching blindly. Instead, use say to ask the player for confirmation or direction (e.g., "当前位于沙漠，附近没有树木，是否继续搜索或前往其他群系？"). Only proceed after receiving explicit confirmation. This overrides Rule 12's "never ask" restriction specifically for biome-resource mismatches to prevent futile long-distance pathfinding.
 
                 Available tools are declared in the tools field. You MUST use them; do not invent tools.
                 """.formatted(botName);
