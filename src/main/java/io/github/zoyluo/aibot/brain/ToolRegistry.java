@@ -874,6 +874,84 @@ public final class ToolRegistry {
         register("goal_status", "Get the current persistent long-term goal status", objectSchema().build(), ToolDefinition.Group.MEMORY, (bot, args) ->
                 ok(BotMemoryStore.INSTANCE.of(bot.getUuid()).goalStatus("")));
 
+        register("todo_add", "Add an item to your self-managed task queue (persisted with the bot; open items are always visible in your context). "
+                + "New items start as pending. Use this queue to plan multi-step work and track what is left; you own its state, the system never mutates it for you.", objectSchema()
+                .property("title", stringSchema("short description of the task"))
+                .property("after_id", integerSchema("insert after this id; 0 = at the front; omit = append at the end", 0, Integer.MAX_VALUE))
+                .required("title")
+                .build(), ToolDefinition.Group.MEMORY, (bot, args) ->
+                ok(BotMemoryStore.INSTANCE.of(bot.getUuid()).addTodo(requiredString(args, "title"), optionalInt(args, "after_id", -1))));
+
+        register("todo_list", "List your task queue. Open items (pending/doing) are always returned; set include_closed to also see done/cancelled items.",
+                objectSchema()
+                        .property("include_closed", booleanSchema("include done/cancelled items"))
+                        .build(), ToolDefinition.Group.MEMORY, (bot, args) -> {
+            List<BotMemory.TodoItem> items = BotMemoryStore.INSTANCE.of(bot.getUuid()).todos();
+            JsonObject root = new JsonObject();
+            com.google.gson.JsonArray open = new com.google.gson.JsonArray();
+            com.google.gson.JsonArray closed = new com.google.gson.JsonArray();
+            int pending = 0;
+            int doing = 0;
+            int done = 0;
+            int cancelled = 0;
+            for (BotMemory.TodoItem item : items) {
+                switch (item.status()) {
+                    case PENDING -> pending++;
+                    case DOING -> doing++;
+                    case DONE -> done++;
+                    case CANCELLED -> cancelled++;
+                }
+                JsonObject json = new JsonObject();
+                json.addProperty("id", item.id());
+                json.addProperty("status", item.status().label());
+                json.addProperty("title", item.title());
+                (item.status().open() ? open : closed).add(json);
+            }
+            root.add("open", open);
+            JsonObject counts = new JsonObject();
+            counts.addProperty("pending", pending);
+            counts.addProperty("doing", doing);
+            counts.addProperty("done", done);
+            counts.addProperty("cancelled", cancelled);
+            root.add("counts", counts);
+            if (optionalBoolean(args, "include_closed", false)) {
+                root.add("closed", closed);
+            }
+            return ok(root.toString());
+        });
+
+        register("todo_update", "Change the status and/or title of a task-queue item, or move it. "
+                + "status: pending|doing|done|cancelled. Omitted fields keep their current values. "
+                + "after_id: move the item right after that id, 0 = move to the front; omit = keep position. "
+                + "Mark items done when you actually finished them and cancelled when you give up — the queue is only useful if you keep it honest.", objectSchema()
+                .property("id", integerSchema("id of the item (the #N number)", 1, Integer.MAX_VALUE))
+                .property("status", stringSchema("pending, doing, done, or cancelled"))
+                .property("title", stringSchema("new title, replaces the old one"))
+                .property("after_id", integerSchema("move right after this id; 0 = front; omit = keep position", 0, Integer.MAX_VALUE))
+                .required("id")
+                .build(), ToolDefinition.Group.MEMORY, (bot, args) -> {
+            BotMemory memory = BotMemoryStore.INSTANCE.of(bot.getUuid());
+            String rawStatus = optionalString(args, "status", "");
+            BotMemory.TodoStatus status = rawStatus.isEmpty() ? null : BotMemory.TodoStatus.parse(rawStatus);
+            String title = args.has("title") && args.get("title").isJsonPrimitive() ? args.get("title").getAsString() : null;
+            boolean move = args.has("after_id") && args.get("after_id").isJsonPrimitive();
+            return ok("updated: " + memory.updateTodo(optionalInt(args, "id", 0), status, title, optionalInt(args, "after_id", 0), move));
+        });
+
+        register("todo_remove", "Delete an item from the task queue entirely. Prefer todo_update with status=cancelled when the record should stay.", objectSchema()
+                .property("id", integerSchema("id of the item (the #N number)", 1, Integer.MAX_VALUE))
+                .required("id")
+                .build(), ToolDefinition.Group.MEMORY, (bot, args) ->
+                ok(BotMemoryStore.INSTANCE.of(bot.getUuid()).removeTodo(optionalInt(args, "id", 0))));
+
+        register("todo_clear", "Prune done/cancelled items from the task queue in bulk. Without status both kinds are removed; cannot remove pending/doing items.", objectSchema()
+                .property("status", stringSchema("done or cancelled; omit = both"))
+                .build(), ToolDefinition.Group.MEMORY, (bot, args) -> {
+            String rawStatus = optionalString(args, "status", "");
+            BotMemory.TodoStatus status = rawStatus.isEmpty() ? null : BotMemory.TodoStatus.parse(rawStatus);
+            return ok(BotMemoryStore.INSTANCE.of(bot.getUuid()).clearTodos(status));
+        });
+
         register("assign_task", "Start a high-level deterministic task for the bot. Prefer dedicated tools (craft/eat/smelt/mine_ore/achieve_goal) when available. Supersedes any current task.", objectSchema()
                 .property("task_type", stringSchema("move, gather, forage, irrigate, milk_cow, raid_crops, attack, mine, strip_mine, mine_vein, build, sleep, light_area, farm, harvest, fish, trade, breed, follow, hold, guard, deposit, stockpile, or withdraw"))
                 .property("params", objectSchema().build())

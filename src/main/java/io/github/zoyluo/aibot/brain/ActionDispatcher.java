@@ -23,7 +23,9 @@ public final class ActionDispatcher {
     private static final int GOAL_FAIL_GUARD_TICKS = 600; // 30s
     private static final java.util.Set<String> USER_PAUSED_ALLOWED_TOOLS = java.util.Set.of(
             "say", "get_task_status", "goal_status", "recall", "list_jobs", "pause", "resume", "stop", "cancel_all",
-            "set_danger_policy", "get_danger_policy");
+            "set_danger_policy", "get_danger_policy",
+            // 这个队列是纯清单编辑(不动 bot 身体),暂停期间正好用来规划后续工作
+            "todo_add", "todo_list", "todo_update", "todo_remove", "todo_clear");
 
     private final ToolRegistry registry;
 
