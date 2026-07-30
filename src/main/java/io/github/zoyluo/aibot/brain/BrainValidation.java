@@ -38,7 +38,7 @@ public final class BrainValidation {
                 "move_to",
                 "{\"x\":0,\"y\":80}")));
         String content = results.isEmpty() ? "" : results.getFirst().content();
-        boolean ok = content != null && content.contains("\"ok\":false") && content.contains("missing_or_bad_arg");
+        boolean ok = content != null && content.contains("\"status\":\"failed\"") && content.contains("missing_or_bad_arg");
         if (ok) {
             return expected(bot, "bad_tool_args", content);
         }

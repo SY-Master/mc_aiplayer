@@ -199,9 +199,9 @@ public final class BrainCoordinator {
                         }
                         future.cancel(false);
                         String reason = timeoutEx != null ? "timeout:" + toolTimeout + "s" : "internal_error";
-                        results.add(ChatMessage.toolResult(callId, new ToolDefinition.ToolResult(false, reason).toToolContent()));
+                        results.add(ChatMessage.toolResult(callId, ToolDefinition.ToolResult.failure(reason).toToolContent()));
                     } catch (Exception e) {
-                        results.add(ChatMessage.toolResult(callId, new ToolDefinition.ToolResult(false, "error:" + e.getMessage()).toToolContent()));
+                        results.add(ChatMessage.toolResult(callId, ToolDefinition.ToolResult.failure("error:" + e.getMessage()).toToolContent()));
                     }
                 }
                 return results;

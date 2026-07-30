@@ -60,7 +60,7 @@ public final class ActionDispatcher {
             }
             ChatToolCall call = calls.get(index);
             if (index >= maxCalls) {
-                ToolDefinition.ToolResult throttled = new ToolDefinition.ToolResult(false, "throttled");
+                ToolDefinition.ToolResult throttled = ToolDefinition.ToolResult.failure("throttled");
                 futures.add(CompletableFuture.completedFuture(
                         ChatMessage.toolResult(call.id(), throttled.toToolContent())));
                 continue;
@@ -68,7 +68,7 @@ public final class ActionDispatcher {
             ToolDefinition definition = registry.get(call.name())
                     .orElse(null);
             if (definition == null) {
-                ToolDefinition.ToolResult unknown = new ToolDefinition.ToolResult(false, "unknown_tool: " + call.name());
+                ToolDefinition.ToolResult unknown = ToolDefinition.ToolResult.failure("unknown_tool: " + call.name());
                 futures.add(CompletableFuture.completedFuture(
                         ChatMessage.toolResult(call.id(), unknown.toToolContent())));
                 continue;
@@ -100,7 +100,7 @@ public final class ActionDispatcher {
             ChatToolCall call = calls.get(index);
             ToolDefinition.ToolResult result;
             if (index >= maxCalls) {
-                result = new ToolDefinition.ToolResult(false, "throttled");
+                result = ToolDefinition.ToolResult.failure("throttled");
             } else {
                 result = invoke(bot, call);
             }
@@ -109,10 +109,10 @@ public final class ActionDispatcher {
             if (!leaseGuard.getAsBoolean()) {
                 break;
             }
-            if (result.ok()) {
+            if (result.isSuccess()) {
                 controlEffect = controlEffect.merge(effectOf(call.name()));
             }
-            BotLog.action(bot, "tool_result", "tool", call.name(), "ok", result.ok(), "message", result.message());
+            BotLog.action(bot, "tool_result", "tool", call.name(), "status", result.status().label(), "message", result.message());
             results.add(ChatMessage.toolResult(call.id(), result.toToolContent()));
         }
         return new DispatchBatch(List.copyOf(results), controlEffect);
@@ -121,7 +121,7 @@ public final class ActionDispatcher {
     private ToolDefinition.ToolResult invoke(AIPlayerEntity bot, ChatToolCall call) {
         try {
             if (TaskManager.INSTANCE.isUserPaused(bot) && !USER_PAUSED_ALLOWED_TOOLS.contains(call.name())) {
-                return new ToolDefinition.ToolResult(false, "blocked: mission_user_paused");
+                return ToolDefinition.ToolResult.paused("mission_user_paused");
             }
             // 优化2:目标刚失败时,大脑常改用 strip_mine/mine_block/move_to(或 assign_task{move/mine/strip_mine})
             // 手动一格格挖、盲目移动,瞬间耗尽轮次,还会把 bot 挖进水/岩浆/怪堆送命(实测两次死亡)。
@@ -129,7 +129,7 @@ public final class ActionDispatcher {
             if (isManualMiningOrMove(call)
                     && io.github.zoyluo.aibot.goal.GoalExecutor.INSTANCE.recentlyFailed(bot, GOAL_FAIL_GUARD_TICKS)) {
                 BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.COMM, bot, "manual_mining_blocked", "tool", call.name());
-                return new ToolDefinition.ToolResult(false,
+                return ToolDefinition.ToolResult.failure(
                         "blocked: 目标刚失败,别手动逐格挖/盲目移动(易耗尽轮次或把自己挖进水/岩浆/怪堆)。"
                                 + "请用高层目标重试(mine_ore 自动换层换位找矿 / gather 自动找资源), 或说明后停下待命。");
             }
@@ -143,11 +143,11 @@ public final class ActionDispatcher {
             // 简洁 warn 不打整页 stacktrace 污染日志,reason 仍清晰回传给大脑让它自行纠正。
             String reason = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
             BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.COMM, bot, "tool_bad_arg", "tool", call.name(), "reason", reason);
-            return new ToolDefinition.ToolResult(false, "bad_arg: " + reason);
+            return ToolDefinition.ToolResult.failure("bad_arg: " + reason);
         } catch (RuntimeException exception) {
             BotLog.error(bot, "tool_exception", exception, "tool", call.name());
             String reason = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
-            return new ToolDefinition.ToolResult(false, "exception: " + reason);
+            return ToolDefinition.ToolResult.failure("exception: " + reason);
         }
     }
 

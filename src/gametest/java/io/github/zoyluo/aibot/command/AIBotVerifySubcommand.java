@@ -2631,7 +2631,7 @@ public final class AIBotVerifySubcommand {
                 TaskManager.INSTANCE.abort(bot);
                 continue;
             }
-            if (r != null && r.ok() && r.message() != null && r.message().contains("goal_assigned")) {
+            if (r != null && r.isSuccess() && r.message() != null && r.message().contains("goal_assigned")) {
                 ok++;
             } else {
                 fails.append(c.tool()).append("=").append(r == null ? "null" : r.message()).append("; ");

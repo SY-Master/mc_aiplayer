@@ -1168,11 +1168,11 @@ public final class ToolRegistry {
     }
 
     private static ToolDefinition.ToolResult ok(String message) {
-        return new ToolDefinition.ToolResult(true, message);
+        return ToolDefinition.ToolResult.success(message);
     }
 
     private static ToolDefinition.ToolResult fail(String message) {
-        return new ToolDefinition.ToolResult(false, message);
+        return ToolDefinition.ToolResult.failure(message);
     }
 
     private static void assignLlm(AIPlayerEntity bot, Task task) {
