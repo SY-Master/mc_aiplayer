@@ -1,0 +1,295 @@
+<?xml version="1.0" encoding="UTF-8"?>
+ <trees>
+     <!-- ==================== 根 ==================== -->
+     <tree path="/src/main/java/io/github/zoyluo/aibot" title="AI机器人根目录"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/AIBotConfig.java" title="AI机器人配置"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/AIBotMod.java" title="AI机器人模组入口"/>
+
+     <!-- ==================== action 动作 ==================== -->
+     <tree path="/src/main/java/io/github/zoyluo/aibot/action" title="动作"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/action/ActionPack.java" title="动作包"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/action/ActionResult.java" title="动作结果"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/action/BlockMiner.java" title="方块挖掘器"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/action/BuildAction.java" title="建造动作"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/action/ContainerAction.java" title="容器动作"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/action/DigNav.java" title="挖掘导航"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/action/EatAction.java" title="进食动作"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/action/EquipAction.java" title="装备动作"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/action/FarmAction.java" title="农耕动作"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/action/HarvestCore.java" title="收割核心"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/action/InteractAction.java" title="交互动作"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/action/InventoryAction.java" title="物品栏动作"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/action/LookAction.java" title="视角动作"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/action/MaterialPalette.java" title="材料调色板"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/action/MilkCowAction.java" title="挤奶动作"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/action/MiningAction.java" title="挖掘动作"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/action/MiningController.java" title="挖掘控制器"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/action/MovementAction.java" title="移动动作"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/action/ToolSelector.java" title="工具选择器"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/action/WalkToController.java" title="步行控制器"/>
+
+     <!-- ==================== auth 认证 ==================== -->
+     <tree path="/src/main/java/io/github/zoyluo/aibot/auth" title="认证"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/auth/BotAuthorizationGate.java" title="机器人授权网关"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/auth/BotAuthorizationPolicy.java" title="机器人授权策略"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/auth/BotTargetSelector.java" title="机器人目标选择器"/>
+
+     <!-- ==================== brain 机器人大脑 ==================== -->
+     <tree path="/src/main/java/io/github/zoyluo/aibot/brain" title="机器人大脑"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/brain/ActionDispatcher.java" title="动作分发器"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/brain/AsyncDecisionExecutor.java" title="异步决策执行器"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/brain/BotReporter.java" title="机器人报告器"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/brain/BotRuntimeOptions.java" title="机器人运行时选项"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/brain/BrainCoordinator.java" title="大脑协调器"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/brain/BrainValidation.java" title="大脑验证"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/brain/ChatCaptureListener.java" title="聊天捕获监听器"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/brain/ChatMessage.java" title="聊天消息"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/brain/ChatResponse.java" title="聊天响应"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/brain/ChatToolCall.java" title="聊天工具调用"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/brain/DecisionLease.java" title="决策租约"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/brain/DecisionSession.java" title="决策会话"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/brain/DeepSeekApiClient.java" title="DeepSeek API客户端"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/brain/DeepSeekApiException.java" title="DeepSeek API异常"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/brain/ReasonText.java" title="推理文本"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/brain/ToolDefinition.java" title="工具定义"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/brain/ToolRegistry.java" title="工具注册表"/>
+
+     <!-- ==================== command 命令 ==================== -->
+     <tree path="/src/main/java/io/github/zoyluo/aibot/command" title="命令"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/command/AIBotBrainSubcommand.java" title="大脑子命令"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/command/AIBotCommand.java" title="AI机器人命令"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/command/AIBotDeplintSubcommand.java" title="部署检查子命令"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/command/AIBotJobSubcommand.java" title="工作任务子命令"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/command/AIBotLogSubcommand.java" title="日志子命令"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/command/AIBotMemorySubcommand.java" title="记忆子命令"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/command/AIBotObserveSubcommand.java" title="观察子命令"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/command/AIBotPersistSubcommand.java" title="持久化子命令"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/command/AIBotSnapshotSubcommand.java" title="快照子命令"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/command/AIBotTaskSubcommand.java" title="任务子命令"/>
+
+     <!-- ==================== coordination 协调 ==================== -->
+     <tree path="/src/main/java/io/github/zoyluo/aibot/coordination" title="协调"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/coordination/IdleCoordinator.java" title="空闲协调器"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/coordination/Job.java" title="工作任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/coordination/TaskBoard.java" title="任务看板"/>
+
+     <!-- ==================== craft 合成 ==================== -->
+     <tree path="/src/main/java/io/github/zoyluo/aibot/craft" title="合成"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/craft/AcquisitionHints.java" title="获取提示"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/craft/CraftingHelper.java" title="合成辅助"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/craft/ItemNames.java" title="物品名称"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/craft/RecipeRegistry.java" title="配方注册表"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/craft/RuntimeRecipeIndex.java" title="运行时配方索引"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/craft/SmeltChain.java" title="熔炼链"/>
+
+     <!-- ==================== entity 实体 ==================== -->
+     <tree path="/src/main/java/io/github/zoyluo/aibot/entity" title="实体"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/entity/AIPlayerEntity.java" title="AI玩家实体"/>
+
+     <!-- ==================== goal 目标 ==================== -->
+     <tree path="/src/main/java/io/github/zoyluo/aibot/goal" title="目标"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/goal/Goal.java" title="目标"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/goal/GoalEvaluation.java" title="目标评估"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/goal/GoalExecutor.java" title="目标执行器"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/goal/GoalPlanner.java" title="目标规划器"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/goal/GoalPredicate.java" title="目标谓词"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/goal/GoalPredicates.java" title="目标谓词集"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/goal/GoalResult.java" title="目标结果"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/goal/GoalSnapshot.java" title="目标快照"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/goal/GoalSnapshotCollector.java" title="目标快照收集器"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/goal/GoalStep.java" title="目标步骤"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/goal/StructureReport.java" title="结构报告"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/goal/StructureVerifier.java" title="结构验证器"/>
+
+     <!-- ==================== log 日志 ==================== -->
+     <tree path="/src/main/java/io/github/zoyluo/aibot/log" title="日志"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/log/BotLog.java" title="机器人日志"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/log/BotLogWriter.java" title="机器人日志写入器"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/log/DiagnosticLogger.java" title="诊断日志器"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/log/LogCategory.java" title="日志类别"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/log/LogEntry.java" title="日志条目"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/log/LogFields.java" title="日志字段"/>
+
+     <!-- ==================== manager 管理器 ==================== -->
+     <tree path="/src/main/java/io/github/zoyluo/aibot/manager" title="管理器"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/manager/AIPlayerManager.java" title="AI玩家管理器"/>
+
+     <!-- ==================== memory 记忆 ==================== -->
+     <tree path="/src/main/java/io/github/zoyluo/aibot/memory" title="记忆"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/memory/BotMemory.java" title="机器人记忆"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/memory/BotMemoryStore.java" title="机器人记忆存储"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/memory/EpisodeLog.java" title="情节日志"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/memory/KnowledgeBase.java" title="知识库"/>
+
+     <!-- ==================== mining 挖掘 ==================== -->
+     <tree path="/src/main/java/io/github/zoyluo/aibot/mining" title="挖掘"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/mining/MiningChain.java" title="挖掘链"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/mining/OreProspector.java" title="矿石勘探器"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/mining/OreScan.java" title="矿石扫描"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/mining/ToolTier.java" title="工具等级"/>
+
+     <!-- ==================== mixin 混入 ==================== -->
+     <tree path="/src/main/java/io/github/zoyluo/aibot/mixin" title="混入"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/mixin/ClientConnectionAccessorMixin.java" title="客户端连接访问器混入"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/mixin/MerchantEntityInvokerMixin.java" title="商人实体调用器混入"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/mixin/PlayerManagerFakePlayerMixin.java" title="玩家管理器假玩家混入"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/mixin/ServerTickProbeMixin.java" title="服务器刻探测混入"/>
+
+     <!-- ==================== mode 模式 ==================== -->
+     <tree path="/src/main/java/io/github/zoyluo/aibot/mode" title="模式"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/mode/CapabilityDecision.java" title="能力决策"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/mode/CapabilityGate.java" title="能力网关"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/mode/CapabilityPolicy.java" title="能力策略"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/mode/CapabilityRuntime.java" title="能力运行时"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/mode/FakePlayerMotion.java" title="假玩家运动"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/mode/ObservableWorldQuery.java" title="可观察世界查询"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/mode/OperatingProfile.java" title="操作配置"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/mode/OperatorCapabilities.java" title="操作者能力"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/mode/PrivilegedCapability.java" title="特权能力"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/mode/ProfileResolver.java" title="配置解析器"/>
+
+     <!-- ==================== network 网络 ==================== -->
+     <tree path="/src/main/java/io/github/zoyluo/aibot/network" title="网络"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/network/AIBotServerNetworking.java" title="AI机器人服务端网络"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/network/AINetworkHandler.java" title="AI网络处理器"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/network/ClientConnectionAccessor.java" title="客户端连接访问器"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/network/FakeClientConnection.java" title="假客户端连接"/>
+
+     <!-- ==================== network/payload 网络数据包 ==================== -->
+     <tree path="/src/main/java/io/github/zoyluo/aibot/network/payload" title="网络数据包"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/network/payload/AIPayloads.java" title="AI数据包注册"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/network/payload/BotChatS2C.java" title="机器人聊天(服务端→客户端)"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/network/payload/BotCommandC2S.java" title="机器人命令(客户端→服务端)"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/network/payload/BotItemMoveC2S.java" title="机器人物品移动(客户端→服务端)"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/network/payload/BotSnapshotS2C.java" title="机器人快照(服务端→客户端)"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/network/payload/BotTeleportC2S.java" title="机器人传送(客户端→服务端)"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/network/payload/SetOptionC2S.java" title="设置选项(客户端→服务端)"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/network/payload/SubscribeBotC2S.java" title="订阅机器人(客户端→服务端)"/>
+
+     <!-- ==================== observe 观察 ==================== -->
+     <tree path="/src/main/java/io/github/zoyluo/aibot/observe" title="观察"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/observe/BotProfiler.java" title="机器人性能分析器"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/observe/ReplayRecorder.java" title="回放录制器"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/observe/TpsGuard.java" title="TPS守卫"/>
+
+     <!-- ==================== pathfinding 寻路 ==================== -->
+     <tree path="/src/main/java/io/github/zoyluo/aibot/pathfinding" title="寻路"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/pathfinding/AStarPathfinder.java" title="A星寻路器"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/pathfinding/CostModel.java" title="代价模型"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/pathfinding/DangerCheck.java" title="危险检查"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/pathfinding/FailureReason.java" title="失败原因"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/pathfinding/MoveType.java" title="移动类型"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/pathfinding/NeighborCandidate.java" title="邻居候选"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/pathfinding/NeighborEnumerator.java" title="邻居枚举器"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/pathfinding/Node.java" title="节点"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/pathfinding/PathExecutor.java" title="路径执行器"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/pathfinding/PathfindingResult.java" title="寻路结果"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/pathfinding/Standability.java" title="可站立性"/>
+
+     <!-- ==================== perception 感知 ==================== -->
+     <tree path="/src/main/java/io/github/zoyluo/aibot/perception" title="感知"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/perception/PerceptionCollector.java" title="感知收集器"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/perception/PerceptionSnapshot.java" title="感知快照"/>
+
+     <!-- ==================== persist 持久化 ==================== -->
+     <tree path="/src/main/java/io/github/zoyluo/aibot/persist" title="持久化"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/persist/AtomicSnapshotFile.java" title="原子快照文件"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/persist/BotPersistence.java" title="机器人持久化"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/persist/BotRecord.java" title="机器人记录"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/persist/ConversationRecord.java" title="对话记录"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/persist/MissionRecord.java" title="任务记录"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/persist/MissionRuntimeRecord.java" title="任务运行时记录"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/persist/MissionSpec.java" title="任务规格"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/persist/PersistedBot.java" title="持久化机器人"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/persist/RuntimeSnapshot.java" title="运行时快照"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/persist/RuntimeSnapshotCodec.java" title="运行时快照编解码器"/>
+
+     <!-- ==================== runtime 运行时 ==================== -->
+     <tree path="/src/main/java/io/github/zoyluo/aibot/runtime" title="运行时"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/runtime/ExecutionStack.java" title="执行栈"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/runtime/IntentControlTransaction.java" title="意图控制事务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/runtime/IntentController.java" title="意图控制器"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/runtime/RuntimeLifecycleCoordinator.java" title="运行时生命周期协调器"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/runtime/TaskOrigin.java" title="任务来源"/>
+
+     <!-- ==================== task 任务 ==================== -->
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task" title="任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/AbstractTask.java" title="抽象任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/BlueprintLoader.java" title="蓝图加载器"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/BlueprintSchema.java" title="蓝图模式"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/BotTickCoordinator.java" title="机器人刻协调器"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/BreedTask.java" title="繁殖任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/BuildTask.java" title="建造任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/CombatCore.java" title="战斗核心"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/CombatTask.java" title="战斗任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/ContainerTask.java" title="容器任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/CraftTask.java" title="合成任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/CreateObsidianTask.java" title="制造黑曜石任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/DangerPolicy.java" title="危险策略"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/DangerPolicyStore.java" title="危险策略存储"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/DangerWatcher.java" title="危险监视器"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/DescendToYTask.java" title="下降到Y层任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/DigDownTask.java" title="向下挖掘任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/EatTask.java" title="进食任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/EmergencyShelterTask.java" title="紧急庇护所任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/EpisodeMemory.java" title="情节记忆"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/EvadeTask.java" title="闪避任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/FarmTask.java" title="农耕任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/FishTask.java" title="钓鱼任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/FollowTask.java" title="跟随任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/GatherQuotaTask.java" title="收集配额任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/GuardTask.java" title="守卫任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/HoldTask.java" title="待命任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/HuntTask.java" title="狩猎任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/IrrigateTask.java" title="灌溉任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/LavaEscapeTask.java" title="岩浆逃生任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/LightAreaTask.java" title="照亮区域任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/MemoryStore.java" title="记忆存储"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/MilkCowTask.java" title="挤奶任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/MineTask.java" title="挖掘任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/MoveTask.java" title="移动任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/NavSafetyNet.java" title="导航安全网"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/OreDigTask.java" title="矿石挖掘任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/PlaceStationsTask.java" title="放置工作站任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/RaidCropsTask.java" title="掠夺作物任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/RecoverDropsTask.java" title="回收掉落物任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/ResupplyTask.java" title="补给任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/SiteFinder.java" title="场地查找器"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/SleepTask.java" title="睡眠任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/SmeltTask.java" title="熔炼任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/StockpileTask.java" title="储备任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/StripMineTask.java" title="条带挖掘任务"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/StuckWatcher.java" title="卡住监视器"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/SurvivalGuard.java" title="生存守卫"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/Task.java" title="任务接口"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/TaskManager.java" title="任务管理器"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/TaskState.java" title="任务状态"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/TaskStatus.java" title="任务状态枚举"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/Threat.java" title="威胁"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/TradeTask.java" title="交易任务"/>
+
+     <!-- ==================== util 工具 ==================== -->
+     <tree path="/src/main/java/io/github/zoyluo/aibot/util" title="工具"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/util/OfflineProfileFactory.java" title="离线档案工厂"/>
+
+     <!-- ==================== client 客户端 ==================== -->
+     <tree path="/src/client/java/io/github/zoyluo/aibot/client" title="客户端"/>
+     <tree path="/src/client/java/io/github/zoyluo/aibot/client/screen" title="屏幕"/>
+     <tree path="/src/client/java/io/github/zoyluo/aibot/client/screen/ui" title="用户界面"/>
+     <tree path="/src/client/java/io/github/zoyluo/aibot/client/screen/ui/cards" title="卡片"/>
+
+     <!-- ==================== gametest 游戏测试 ==================== -->
+     <tree path="/src/gametest/java/io/github/zoyluo/aibot/gametest" title="游戏测试"/>
+     <tree path="/src/gametest/java/io/github/zoyluo/aibot/command" title="游戏测试命令"/>
+
+     <!-- ==================== test 测试 ==================== -->
+     <tree path="/src/test/java/io/github/zoyluo/aibot/auth" title="认证测试"/>
+     <tree path="/src/test/java/io/github/zoyluo/aibot/brain" title="大脑测试"/>
+     <tree path="/src/test/java/io/github/zoyluo/aibot/coordination" title="协调测试"/>
+     <tree path="/src/test/java/io/github/zoyluo/aibot/goal" title="目标测试"/>
+     <tree path="/src/test/java/io/github/zoyluo/aibot/memory" title="记忆测试"/>
+     <tree path="/src/test/java/io/github/zoyluo/aibot/mode" title="模式测试"/>
+     <tree path="/src/test/java/io/github/zoyluo/aibot/persist" title="持久化测试"/>
+     <tree path="/src/test/java/io/github/zoyluo/aibot/runtime" title="运行时测试"/>
+     <tree path="/src/test/java/io/github/zoyluo/aibot/task" title="任务测试"/>
+ </trees>
