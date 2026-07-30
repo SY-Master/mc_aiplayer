@@ -39,9 +39,11 @@ import java.util.HashSet;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.ArrayList;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -56,9 +58,20 @@ public final class GoalExecutor {
     private final Map<UUID, Integer> lastGoalFailTick = new ConcurrentHashMap<>(); // 优化2:goal 整体失败时刻,拦大脑随后手动逐格挖矿
     private final Map<UUID, Goal> userGoal = new ConcurrentHashMap<>(); // B:用户原始高层目标,防大脑把它降级成其前置子目标(挖钻石→做铁镐)
     private final Map<UUID, GoalResult> lastResults = new ConcurrentHashMap<>();
+    private final Map<UUID, List<CompletableFuture<GoalResult>>> completionFutures = new ConcurrentHashMap<>();
     private final AtomicLong resultSequence = new AtomicLong();
 
     private GoalExecutor() {
+    }
+
+    /**
+     * 注册目标完成回调，返回一个在目标 publishResult 时完成的 Future。
+     * 用于真同步工具调用：Goal 类工具（mine_ore/achieve_goal 等）提交后，工作线程阻塞等待此 Future。
+     */
+    public CompletableFuture<GoalResult> whenComplete(AIPlayerEntity bot) {
+        CompletableFuture<GoalResult> future = new CompletableFuture<>();
+        completionFutures.computeIfAbsent(bot.getUuid(), k -> new ArrayList<>()).add(future);
+        return future;
     }
 
     public boolean submit(AIPlayerEntity bot, Goal goal) {
@@ -276,7 +289,17 @@ public final class GoalExecutor {
         lastGoalFailTick.remove(uuid);
         userGoal.remove(uuid);
         lastResults.remove(uuid);
+        cancelFuture(uuid);
         io.github.zoyluo.aibot.task.EpisodeMemory.INSTANCE.reset(uuid);
+    }
+
+    private void cancelFuture(UUID uuid) {
+        List<CompletableFuture<GoalResult>> futures = completionFutures.remove(uuid);
+        if (futures != null) {
+            for (CompletableFuture<GoalResult> f : futures) {
+                f.cancel(false);
+            }
+        }
     }
 
     public void clearAllRuntime() {
@@ -285,6 +308,8 @@ public final class GoalExecutor {
         lastGoalFailTick.clear();
         userGoal.clear();
         lastResults.clear();
+        completionFutures.values().forEach(list -> list.forEach(f -> f.cancel(false)));
+        completionFutures.clear();
     }
 
     public int queuedGoalCount(AIPlayerEntity bot) {
@@ -824,6 +849,12 @@ public final class GoalExecutor {
 
     private void publishResult(AIPlayerEntity bot, GoalResult result) {
         lastResults.put(bot.getUuid(), result);
+        List<CompletableFuture<GoalResult>> futures = completionFutures.remove(bot.getUuid());
+        if (futures != null) {
+            for (CompletableFuture<GoalResult> f : futures) {
+                f.complete(result);
+            }
+        }
         BotLog.task(bot, "goal_result",
                 "sequence", result.sequence(),
                 "mission_id", result.missionId(),

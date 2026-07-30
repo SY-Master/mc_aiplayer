@@ -8,6 +8,7 @@ import io.github.zoyluo.aibot.task.TaskManager;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.BooleanSupplier;
 
 public final class ActionDispatcher {
@@ -37,6 +38,50 @@ public final class ActionDispatcher {
                                       List<ChatToolCall> calls,
                                       BooleanSupplier leaseGuard) {
         return dispatchBatch(bot, calls, leaseGuard).messages();
+    }
+
+    /**
+     * 异步分发：在服务器线程上依次调用工具，收集 CompletableFuture。
+     * 异步工具通过 AsyncHandler.prepare() 启动任务并返回 future；
+     * 同步工具原地执行后包装为已完成的 future。
+     * 调用方在工作线程上阻塞等待 allOf(futures)，完成后再回到服务器线程继续 LLM 对话。
+     */
+    public AsyncDispatchBatch dispatchBatchAsync(AIPlayerEntity bot,
+                                                  List<ChatToolCall> calls,
+                                                  BooleanSupplier leaseGuard) {
+        int maxCalls = AIBotConfig.get().brain().maxToolCallsPerTurn();
+        List<CompletableFuture<ChatMessage>> futures = new ArrayList<>();
+        for (int index = 0; index < calls.size(); index++) {
+            if (!leaseGuard.getAsBoolean()) {
+                break;
+            }
+            ChatToolCall call = calls.get(index);
+            if (index >= maxCalls) {
+                ToolDefinition.ToolResult throttled = new ToolDefinition.ToolResult(false, "throttled");
+                futures.add(CompletableFuture.completedFuture(
+                        ChatMessage.toolResult(call.id(), throttled.toToolContent())));
+                continue;
+            }
+            ToolDefinition definition = registry.get(call.name())
+                    .orElse(null);
+            if (definition == null) {
+                ToolDefinition.ToolResult unknown = new ToolDefinition.ToolResult(false, "unknown_tool: " + call.name());
+                futures.add(CompletableFuture.completedFuture(
+                        ChatMessage.toolResult(call.id(), unknown.toToolContent())));
+                continue;
+            }
+            if (definition.asyncHandler() != null) {
+                // 异步工具：调用 prepare() 启动任务，返回 future
+                futures.add(definition.asyncHandler().prepare(bot, call.parsedArguments())
+                        .thenApply(result -> ChatMessage.toolResult(call.id(), result.toToolContent())));
+            } else {
+                // 同步工具：原地执行
+                ToolDefinition.ToolResult result = invoke(bot, call);
+                futures.add(CompletableFuture.completedFuture(
+                        ChatMessage.toolResult(call.id(), result.toToolContent())));
+            }
+        }
+        return new AsyncDispatchBatch(futures);
     }
 
     public DispatchBatch dispatchBatch(AIPlayerEntity bot,
@@ -151,5 +196,9 @@ public final class ActionDispatcher {
     }
 
     public record DispatchBatch(List<ChatMessage> messages, ControlEffect controlEffect) {
+    }
+
+    /** 异步分发结果：包含每个工具调用对应的 CompletableFuture，在工作线程上等待。 */
+    public record AsyncDispatchBatch(List<CompletableFuture<ChatMessage>> futures) {
     }
 }

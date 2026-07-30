@@ -30,31 +30,7 @@ import io.github.zoyluo.aibot.mode.PrivilegedCapability;
 import io.github.zoyluo.aibot.runtime.IntentController;
 import io.github.zoyluo.aibot.runtime.TaskOrigin;
 import io.github.zoyluo.aibot.runtime.IntentControlTransaction;
-import io.github.zoyluo.aibot.task.BlueprintLoader;
-import io.github.zoyluo.aibot.task.BreedTask;
-import io.github.zoyluo.aibot.task.BuildTask;
-import io.github.zoyluo.aibot.task.CombatTask;
-import io.github.zoyluo.aibot.task.ContainerTask;
-import io.github.zoyluo.aibot.task.CraftTask;
-import io.github.zoyluo.aibot.task.EatTask;
-import io.github.zoyluo.aibot.task.FishTask;
-import io.github.zoyluo.aibot.task.FarmTask;
-import io.github.zoyluo.aibot.task.GatherQuotaTask;
-import io.github.zoyluo.aibot.task.FollowTask;
-import io.github.zoyluo.aibot.task.GuardTask;
-import io.github.zoyluo.aibot.task.HoldTask;
-import io.github.zoyluo.aibot.task.LightAreaTask;
-import io.github.zoyluo.aibot.task.MineTask;
-import io.github.zoyluo.aibot.task.MoveTask;
-import io.github.zoyluo.aibot.task.SleepTask;
-import io.github.zoyluo.aibot.task.SmeltTask;
-import io.github.zoyluo.aibot.task.StockpileTask;
-import io.github.zoyluo.aibot.task.OreDigTask;
-import io.github.zoyluo.aibot.task.StripMineTask;
-import io.github.zoyluo.aibot.task.Task;
-import io.github.zoyluo.aibot.task.TaskManager;
-import io.github.zoyluo.aibot.task.TaskStatus;
-import io.github.zoyluo.aibot.task.TradeTask;
+import io.github.zoyluo.aibot.task.*;
 import net.minecraft.block.Block;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
@@ -75,6 +51,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 public final class ToolRegistry {
     private final Map<String, ToolDefinition> tools = new LinkedHashMap<>();
@@ -192,64 +169,67 @@ public final class ToolRegistry {
                 .required("item")
                 .build(), (bot, args) -> ok(craftPlanJson(CraftingHelper.plan(bot, requiredItem(args, "item"), optionalInt(args, "count", 1)))));
 
-        register("craft", "Craft an item using known survival recipes. It resolves planks and sticks recursively, so prefer crafting the target tool/item directly instead of crafting planks or sticks as separate steps. It does not gather, smelt, or open GUIs. For 3x3 recipes, craft minecraft:crafting_table first; after that this task can use a nearby table or place a held table automatically. Do not use select_hotbar/place_block for the crafting table unless the human asks. Fails with need: <item> xN when base materials are missing.", objectSchema()
+        register("craft", "Craft an item using known survival recipes. It resolves planks and sticks recursively. Fails with need: <item> xN when base materials are missing.", objectSchema()
                 .property("item", stringSchema("item id, for example minecraft:stone_pickaxe"))
                 .property("count", integerSchema("desired count"))
                 .required("item")
-                .build(), (bot, args) -> {
-            Task task = new CraftTask(requiredItem(args, "item"), optionalInt(args, "count", 1));
-            assignLlm(bot, task);
-            return ok("assigned: " + task.name());
-        });
+                .build(),
+            (bot, args) -> {
+                Task task = new CraftTask(requiredItem(args, "item"), optionalInt(args, "count", 1));
+                assignLlm(bot, task);
+                return ok("assigned: " + task.name());
+            },
+            (bot, args) -> {
+                CompletableFuture<ToolDefinition.ToolResult> future = new CompletableFuture<>();
+                CompletableFuture<TaskStatus> taskFuture = TaskManager.INSTANCE.whenComplete(bot);
+                Task task = new CraftTask(requiredItem(args, "item"), optionalInt(args, "count", 1));
+                assignLlm(bot, task);
+                taskFuture.thenAccept(status ->
+                    future.complete(status.state() == TaskState.COMPLETED
+                        ? ok(status.description())
+                        : fail(status.failureReason() != null ? status.failureReason() : "failed")));
+                return future;
+            });
 
-        register("eat", "Eat available food from inventory", objectSchema().build(), (bot, args) -> {
-            Task task = new EatTask();
-            assignLlm(bot, task);
-            return ok("assigned: " + task.name());
-        });
+        register("eat", "Eat available food from inventory", objectSchema().build(),
+            (bot, args) -> { Task task = new EatTask(); assignLlm(bot, task); return ok("assigned: " + task.name()); },
+            taskAsyncHandler(args -> new EatTask()));
 
-        register("smelt", "Smelt input items in a nearby or held furnace using available fuel. It does not craft a furnace; call craft first if needed.", objectSchema()
+        register("smelt", "Smelt input items in a nearby or held furnace using available fuel.", objectSchema()
                 .property("input_item", stringSchema("input item id, for example minecraft:raw_iron"))
                 .property("output_item", stringSchema("expected output item id, for example minecraft:iron_ingot"))
                 .property("count", integerSchema("output count"))
                 .required("input_item")
                 .required("output_item")
-                .build(), (bot, args) -> {
-            Task task = new SmeltTask(
-                    requiredItem(args, "input_item"),
-                    requiredItem(args, "output_item"),
-                    optionalInt(args, "count", 1));
-            assignLlm(bot, task);
-            return ok("assigned: " + task.name());
-        });
+                .build(),
+            (bot, args) -> {
+                Task task = new SmeltTask(requiredItem(args, "input_item"), requiredItem(args, "output_item"), optionalInt(args, "count", 1));
+                assignLlm(bot, task);
+                return ok("assigned: " + task.name());
+            },
+            taskAsyncHandler(args -> new SmeltTask(requiredItem(args, "input_item"), requiredItem(args, "output_item"), optionalInt(args, "count", 1))));
 
-        register("gather", "Gather an item until the inventory contains the requested quota. Use this for requests like collect 64 cobblestone; it loops survey, move, harvest, and pickup without assigning child tasks.", objectSchema()
+        register("gather", "Gather an item until the inventory contains the requested quota.", objectSchema()
                 .property("item", stringSchema("target item id, for example minecraft:cobblestone"))
                 .property("count", integerSchema("desired inventory count"))
                 .required("item")
-                .build(), (bot, args) -> {
-            Task task = new GatherQuotaTask(requiredItem(args, "item"), optionalInt(args, "count", 1));
-            assignLlm(bot, task);
-            return ok("assigned: " + task.name());
-        });
+                .build(),
+            (bot, args) -> { Task task = new GatherQuotaTask(requiredItem(args, "item"), optionalInt(args, "count", 1)); assignLlm(bot, task); return ok("assigned: " + task.name()); },
+            taskAsyncHandler(args -> new GatherQuotaTask(requiredItem(args, "item"), optionalInt(args, "count", 1))));
 
-        register("fish", "Fish at nearby water with a fishing rod. Casts, waits for bite, reels, collects loot, and loops until max_catches or max_ticks.", objectSchema()
+        register("fish", "Fish at nearby water with a fishing rod.", objectSchema()
                 .property("max_catches", integerSchema("number of successful catches"))
                 .property("max_ticks", integerSchema("maximum task duration in ticks"))
-                .build(), (bot, args) -> {
-            Task task = new FishTask(optionalInt(args, "max_catches", 1), optionalInt(args, "max_ticks", 6000));
-            assignLlm(bot, task);
-            return ok("assigned: " + task.name());
-        });
+                .build(),
+            (bot, args) -> { Task task = new FishTask(optionalInt(args, "max_catches", 1), optionalInt(args, "max_ticks", 6000)); assignLlm(bot, task); return ok("assigned: " + task.name()); },
+            taskAsyncHandler(args -> new FishTask(optionalInt(args, "max_catches", 1), optionalInt(args, "max_ticks", 6000))));
 
-        register("trade", "Trade directly with a nearby villager without opening a merchant screen. Supports simple one-input offers, optionally targeting a sell item.", objectSchema()
+        register("trade", "Trade directly with a nearby villager.", objectSchema()
                 .property("target_item", stringSchema("optional item id to buy, for example minecraft:bread"))
                 .property("max_distance", integerSchema("search radius"))
-                .build(), (bot, args) -> {
-            Task task = new TradeTask(optionalItem(args, "target_item"), optionalInt(args, "max_distance", 16));
-            assignLlm(bot, task);
-            return ok("assigned: " + task.name());
-        });
+                .build(),
+            (bot, args) -> { Task task = new TradeTask(optionalItem(args, "target_item"), optionalInt(args, "max_distance", 16)); assignLlm(bot, task); return ok("assigned: " + task.name()); },
+            taskAsyncHandler(args -> new TradeTask(optionalItem(args, "target_item"), optionalInt(args, "max_distance", 16))));
 
         register("set_base", "Remember the bot's current position as the base for stockpiling and resupply tasks.", objectSchema().build(), ToolDefinition.Group.MEMORY, (bot, args) -> {
             BotMemoryStore.INSTANCE.of(bot.getUuid()).markPlace("base", bot.getServerWorld(), bot.getBlockPos());
@@ -295,50 +275,112 @@ public final class ToolRegistry {
                 .property("ore", stringSchema("ore block id or raw item, e.g. minecraft:iron_ore or minecraft:raw_iron"))
                 .property("count", integerSchema("how many ore blocks to mine"))
                 .required("ore")
-                .build(), (bot, args) -> {
-            if (!AIBotConfig.get().goal().autoToolFillEnabled()) {
-                Task task = new OreDigTask(oreTargetsFrom(requiredString(args, "ore")), optionalInt(args, "count", 1));
-                assignLlm(bot, task);
-                return ok("assigned: " + task.name());
-            }
-            boolean started = GoalExecutor.INSTANCE.submit(bot,
-                    new Goal.MineOre(oreTargetsFrom(requiredString(args, "ore")), optionalInt(args, "count", 1)));
-            return started ? ok("goal_assigned: mine_ore") : fail("goal_plan_failed");
-        });
+                .build(),
+            (bot, args) -> {
+                if (!AIBotConfig.get().goal().autoToolFillEnabled()) {
+                    Task task = new OreDigTask(oreTargetsFrom(requiredString(args, "ore")), optionalInt(args, "count", 1));
+                    assignLlm(bot, task);
+                    return ok("assigned: " + task.name());
+                }
+                boolean started = GoalExecutor.INSTANCE.submit(bot,
+                        new Goal.MineOre(oreTargetsFrom(requiredString(args, "ore")), optionalInt(args, "count", 1)));
+                return started ? ok("goal_assigned: mine_ore") : fail("goal_plan_failed");
+            },
+            (bot, args) -> {
+                // 异步：注册 goal 完成回调，等待整个目标执行完毕后返回真实结果
+                CompletableFuture<ToolDefinition.ToolResult> future = new CompletableFuture<>();
+                CompletableFuture<io.github.zoyluo.aibot.goal.GoalResult> goalFuture = GoalExecutor.INSTANCE.whenComplete(bot);
+                if (!AIBotConfig.get().goal().autoToolFillEnabled()) {
+                    Task task = new OreDigTask(oreTargetsFrom(requiredString(args, "ore")), optionalInt(args, "count", 1));
+                    CompletableFuture<TaskStatus> taskFuture = TaskManager.INSTANCE.whenComplete(bot);
+                    assignLlm(bot, task);
+                    taskFuture.thenAccept(status ->
+                        future.complete(status.state() == TaskState.COMPLETED
+                            ? ok(status.description())
+                            : fail(status.failureReason() != null ? status.failureReason() : "failed")));
+                    return future;
+                }
+                boolean started = GoalExecutor.INSTANCE.submit(bot,
+                        new Goal.MineOre(oreTargetsFrom(requiredString(args, "ore")), optionalInt(args, "count", 1)));
+                goalFuture.thenAccept(result ->
+                    future.complete(result.status() == io.github.zoyluo.aibot.goal.GoalResult.Status.COMPLETED
+                        ? ok("goal_completed: " + GoalExecutor.INSTANCE.resultSummary(result))
+                        : fail(result.reason())));
+                return future;
+            });
 
         register("achieve_goal", "Achieve an item/tool inventory goal with deterministic planning. Use this for requests like make an iron pickaxe or obtain 10 iron ingots; do not manually decompose the steps.", objectSchema()
                 .property("item", stringSchema("target item/tool id, for example minecraft:iron_pickaxe or minecraft:iron_ingot"))
                 .property("count", integerSchema("desired inventory count"))
                 .required("item")
-                .build(), (bot, args) -> {
-            boolean started = GoalExecutor.INSTANCE.submit(bot,
-                    new Goal.HaveItem(requiredItem(args, "item"), optionalInt(args, "count", 1)));
-            return started ? ok("goal_assigned: achieve_goal") : fail("goal_plan_failed");
-        });
+                .build(),
+            (bot, args) -> {
+                boolean started = GoalExecutor.INSTANCE.submit(bot,
+                        new Goal.HaveItem(requiredItem(args, "item"), optionalInt(args, "count", 1)));
+                return started ? ok("goal_assigned: achieve_goal") : fail("goal_plan_failed");
+            },
+            (bot, args) -> {
+                CompletableFuture<ToolDefinition.ToolResult> future = new CompletableFuture<>();
+                CompletableFuture<io.github.zoyluo.aibot.goal.GoalResult> goalFuture = GoalExecutor.INSTANCE.whenComplete(bot);
+                GoalExecutor.INSTANCE.submit(bot,
+                        new Goal.HaveItem(requiredItem(args, "item"), optionalInt(args, "count", 1)));
+                goalFuture.thenAccept(result ->
+                    future.complete(result.status() == io.github.zoyluo.aibot.goal.GoalResult.Status.COMPLETED
+                        ? ok("goal_completed: " + GoalExecutor.INSTANCE.resultSummary(result))
+                        : fail(result.reason())));
+                return future;
+            });
 
         register("harvest_crop", "Grow and harvest a crop with deterministic planning. Use for requests like 种小麦/收点小麦/get wheat. Crop is wheat, carrot, or potato. The system auto-prepares a hoe, tills, plants, waits for growth, and harvests; do not decompose manually.", objectSchema()
                 .property("crop", stringSchema("crop: wheat, carrot, or potato"))
                 .property("count", integerSchema("how many to harvest"))
                 .required("crop")
-                .build(), (bot, args) -> {
-            FarmAction.CropSpec spec = FarmAction.cropSpec(requiredString(args, "crop"));
-            net.minecraft.item.Item produce = spec.crop() == net.minecraft.block.Blocks.WHEAT
-                    ? net.minecraft.item.Items.WHEAT
-                    : spec.seed(); // 胡萝卜/土豆:产出即种子物品
-            boolean started = GoalExecutor.INSTANCE.submit(bot,
-                    new Goal.HarvestCrop(spec.crop(), spec.seed(), produce, optionalInt(args, "count", 1)));
-            return started ? ok("goal_assigned: harvest_crop") : fail("goal_plan_failed");
-        });
+                .build(),
+            (bot, args) -> {
+                FarmAction.CropSpec spec = FarmAction.cropSpec(requiredString(args, "crop"));
+                net.minecraft.item.Item produce = spec.crop() == net.minecraft.block.Blocks.WHEAT
+                        ? net.minecraft.item.Items.WHEAT
+                        : spec.seed();
+                boolean started = GoalExecutor.INSTANCE.submit(bot,
+                        new Goal.HarvestCrop(spec.crop(), spec.seed(), produce, optionalInt(args, "count", 1)));
+                return started ? ok("goal_assigned: harvest_crop") : fail("goal_plan_failed");
+            },
+            (bot, args) -> {
+                CompletableFuture<ToolDefinition.ToolResult> future = new CompletableFuture<>();
+                CompletableFuture<io.github.zoyluo.aibot.goal.GoalResult> goalFuture = GoalExecutor.INSTANCE.whenComplete(bot);
+                FarmAction.CropSpec spec = FarmAction.cropSpec(requiredString(args, "crop"));
+                net.minecraft.item.Item produce = spec.crop() == net.minecraft.block.Blocks.WHEAT
+                        ? net.minecraft.item.Items.WHEAT
+                        : spec.seed();
+                GoalExecutor.INSTANCE.submit(bot,
+                        new Goal.HarvestCrop(spec.crop(), spec.seed(), produce, optionalInt(args, "count", 1)));
+                goalFuture.thenAccept(result ->
+                    future.complete(result.status() == io.github.zoyluo.aibot.goal.GoalResult.Status.COMPLETED
+                        ? ok("goal_completed: " + GoalExecutor.INSTANCE.resultSummary(result))
+                        : fail(result.reason())));
+                return future;
+            });
 
         register("provision_food", "Stock food end-to-end; AUTO-PICKS hunting or farming by scanning what's actually around (perception-driven). "
-                + "This is the DEFAULT for ANY general 'get food' request: 找吃的/找点吃的/找吃的去/找吃的去啊/去找吃的/找东西吃/找点东西吃/去搞点吃的/弄点吃的/弄点肉/打点肉吃/去打猎/我饿了/饿了/备点粮/搞点食物/补充食物/get some food/go find food/make food/go hunt. "
+                + "This is the DEFAULT for ANY general 'get food' request. "
                 + "Auto-plans (hunt->cook meat OR farm->bread) based on surroundings; do NOT decompose manually. count = how many food items (default 4).", objectSchema()
                 .property("count", integerSchema("how many cooked food items to stock (default 4)"))
-                .build(), (bot, args) -> {
-            boolean started = GoalExecutor.INSTANCE.submit(bot,
-                    new Goal.Food(optionalInt(args, "count", 4)));
-            return started ? ok("goal_assigned: provision_food") : fail("goal_plan_failed");
-        });
+                .build(),
+            (bot, args) -> {
+                boolean started = GoalExecutor.INSTANCE.submit(bot,
+                        new Goal.Food(optionalInt(args, "count", 4)));
+                return started ? ok("goal_assigned: provision_food") : fail("goal_plan_failed");
+            },
+            (bot, args) -> {
+                CompletableFuture<ToolDefinition.ToolResult> future = new CompletableFuture<>();
+                CompletableFuture<io.github.zoyluo.aibot.goal.GoalResult> goalFuture = GoalExecutor.INSTANCE.whenComplete(bot);
+                GoalExecutor.INSTANCE.submit(bot, new Goal.Food(optionalInt(args, "count", 4)));
+                goalFuture.thenAccept(result ->
+                    future.complete(result.status() == io.github.zoyluo.aibot.goal.GoalResult.Status.COMPLETED
+                        ? ok("goal_completed: " + GoalExecutor.INSTANCE.resultSummary(result))
+                        : fail(result.reason())));
+                return future;
+            });
 
         register("forage", "Forage SPECIFIC wild berries/melon nearby. ONLY when the user EXPLICITLY asks for berries/wild fruit, NOT for general food. "
                 + "Use for 采点野果/采点浆果/摘浆果/采甜浆果/摘西瓜/想吃浆果; needs berry bushes or melons around. "
@@ -351,49 +393,84 @@ public final class ToolRegistry {
         });
 
         register("achieve_armor", "Make and equip a full set of iron armor plus an iron sword with deterministic planning. Use for 武装起来/做一身装备/给我穿上盔甲/gear up. Auto-plans mining, smelting and crafting; do not decompose manually.", objectSchema()
-                .build(), (bot, args) -> {
-            boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.Armor());
-            return started ? ok("goal_assigned: achieve_armor") : fail("goal_plan_failed");
-        });
+                .build(),
+            (bot, args) -> {
+                boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.Armor());
+                return started ? ok("goal_assigned: achieve_armor") : fail("goal_plan_failed");
+            },
+            (bot, args) -> {
+                CompletableFuture<ToolDefinition.ToolResult> future = new CompletableFuture<>();
+                CompletableFuture<io.github.zoyluo.aibot.goal.GoalResult> goalFuture = GoalExecutor.INSTANCE.whenComplete(bot);
+                GoalExecutor.INSTANCE.submit(bot, new Goal.Armor());
+                goalFuture.thenAccept(result ->
+                    future.complete(result.status() == io.github.zoyluo.aibot.goal.GoalResult.Status.COMPLETED
+                        ? ok("goal_completed: " + GoalExecutor.INSTANCE.resultSummary(result))
+                        : fail(result.reason())));
+                return future;
+            });
 
         register("achieve_workstation", "Set up a base: craft and place a crafting table, furnace and chest nearby. Use for 建个家/搭个工作台/摆好工作台熔炉箱子/set up a base. Auto-plans gathering and crafting; do not decompose manually.", objectSchema()
-                .build(), (bot, args) -> {
-            boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.Workstation());
-            return started ? ok("goal_assigned: achieve_workstation") : fail("goal_plan_failed");
-        });
+                .build(),
+            (bot, args) -> {
+                boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.Workstation());
+                return started ? ok("goal_assigned: achieve_workstation") : fail("goal_plan_failed");
+            },
+            (bot, args) -> {
+                CompletableFuture<ToolDefinition.ToolResult> future = new CompletableFuture<>();
+                CompletableFuture<io.github.zoyluo.aibot.goal.GoalResult> goalFuture = GoalExecutor.INSTANCE.whenComplete(bot);
+                GoalExecutor.INSTANCE.submit(bot, new Goal.Workstation());
+                goalFuture.thenAccept(result ->
+                    future.complete(result.status() == io.github.zoyluo.aibot.goal.GoalResult.Status.COMPLETED
+                        ? ok("goal_completed: " + GoalExecutor.INSTANCE.resultSummary(result))
+                        : fail(result.reason())));
+                return future;
+            });
 
-        register("build_house", "Build a house/shelter. Use for 盖房子/建个家/造房子/盖个小屋/build a house. The goal system auto-gathers ALL missing materials (wood/stone/glass) then builds — call once then STOP. Either pass blueprint (small_hut default, hut_5x5), OR pass width/depth/height/material for a custom house (e.g. 盖个7格宽的石头房 -> width=7, material=stone_like). material: planks (wood, default) / stone_like / glass.", objectSchema()
-                .property("blueprint", stringSchema("preset blueprint name: small_hut (default) or hut_5x5; ignored when width/depth/height given"))
+        register("build_house", "Build a house/shelter. The goal system auto-gathers ALL missing materials then builds — call once then STOP.", objectSchema()
+                .property("blueprint", stringSchema("preset blueprint name: small_hut (default) or hut_5x5"))
                 .property("width", integerSchema("custom house outer width in blocks (3..16)", 3, 16))
                 .property("depth", integerSchema("custom house outer depth in blocks (3..16)", 3, 16))
                 .property("height", integerSchema("custom house wall height in blocks (2..8)", 2, 8))
                 .property("material", stringSchema("wall material palette: planks (default) / stone_like / glass"))
-                .build(), (bot, args) -> {
-            // P3 参数化:给了任意尺寸参数就走 custom:WxDxH:material 规格(缺省边长 5/5/3),否则用预设蓝图。
-            boolean custom = args != null && (args.has("width") || args.has("depth") || args.has("height") || args.has("material"));
-            String bp;
-            if (custom) {
-                int w = optionalInt(args, "width", 5);
-                int d = optionalInt(args, "depth", 5);
-                int h = optionalInt(args, "height", 3);
-                String material = optionalString(args, "material", "planks");
-                bp = "custom:" + w + "x" + d + "x" + h + ":" + material;
-            } else {
-                bp = optionalString(args, "blueprint", "small_hut");
-            }
-            boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.Build(bp));
-            return started ? ok("goal_assigned: build " + bp) : fail("goal_plan_failed");
-        });
+                .build(),
+            (bot, args) -> {
+                String bp = buildBlueprint(args);
+                boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.Build(bp));
+                return started ? ok("goal_assigned: build " + bp) : fail("goal_plan_failed");
+            },
+            (bot, args) -> {
+                CompletableFuture<ToolDefinition.ToolResult> future = new CompletableFuture<>();
+                CompletableFuture<io.github.zoyluo.aibot.goal.GoalResult> goalFuture = GoalExecutor.INSTANCE.whenComplete(bot);
+                String bp = buildBlueprint(args);
+                GoalExecutor.INSTANCE.submit(bot, new Goal.Build(bp));
+                goalFuture.thenAccept(result ->
+                    future.complete(result.status() == io.github.zoyluo.aibot.goal.GoalResult.Status.COMPLETED
+                        ? ok("goal_completed: " + GoalExecutor.INSTANCE.resultSummary(result))
+                        : fail(result.reason())));
+                return future;
+            });
 
-        register("stockpile", "Obtain N of an item then store everything into a nearby chest. Use for 囤货/囤点/存起来/stockpile N cobblestone. Auto-plans obtaining and depositing; do not decompose manually.", objectSchema()
+        register("stockpile", "Obtain N of an item then store everything into a nearby chest. Auto-plans obtaining and depositing; do not decompose manually.", objectSchema()
                 .property("item", stringSchema("item id to stockpile, e.g. minecraft:cobblestone"))
                 .property("count", integerSchema("how many to obtain"))
                 .required("item")
-                .build(), (bot, args) -> {
-            boolean started = GoalExecutor.INSTANCE.submit(bot,
-                    new Goal.Stockpile(requiredItem(args, "item"), optionalInt(args, "count", 1)));
-            return started ? ok("goal_assigned: stockpile") : fail("goal_plan_failed");
-        });
+                .build(),
+            (bot, args) -> {
+                boolean started = GoalExecutor.INSTANCE.submit(bot,
+                        new Goal.Stockpile(requiredItem(args, "item"), optionalInt(args, "count", 1)));
+                return started ? ok("goal_assigned: stockpile") : fail("goal_plan_failed");
+            },
+            (bot, args) -> {
+                CompletableFuture<ToolDefinition.ToolResult> future = new CompletableFuture<>();
+                CompletableFuture<io.github.zoyluo.aibot.goal.GoalResult> goalFuture = GoalExecutor.INSTANCE.whenComplete(bot);
+                GoalExecutor.INSTANCE.submit(bot,
+                        new Goal.Stockpile(requiredItem(args, "item"), optionalInt(args, "count", 1)));
+                goalFuture.thenAccept(result ->
+                    future.complete(result.status() == io.github.zoyluo.aibot.goal.GoalResult.Status.COMPLETED
+                        ? ok("goal_completed: " + GoalExecutor.INSTANCE.resultSummary(result))
+                        : fail(result.reason())));
+                return future;
+            });
 
         register("find_container", "Find the nearest reachable inventory container such as a chest", objectSchema()
                 .property("radius", integerSchema("search radius"))
@@ -453,49 +530,46 @@ public final class ToolRegistry {
             return ok("assigned: " + task.name());
         });
 
-        register("sleep", "Find or place a bed, sleep through night, and wake up in the morning", objectSchema().build(), (bot, args) -> {
-            Task task = new SleepTask();
-            assignLlm(bot, task);
-            return ok("assigned: " + task.name());
-        });
+        register("sleep", "Find or place a bed, sleep through night, and wake up in the morning", objectSchema().build(),
+            (bot, args) -> { Task task = new SleepTask(); assignLlm(bot, task); return ok("assigned: " + task.name()); },
+            taskAsyncHandler(args -> new SleepTask()));
 
         register("light_area", "Place torches around the bot where block light is below the configured threshold", objectSchema()
                 .property("radius", integerSchema("scan radius"))
                 .property("max_torches", integerSchema("maximum torches to place"))
-                .build(), (bot, args) -> {
-            Task task = new LightAreaTask(optionalInt(args, "radius", 8), optionalInt(args, "max_torches", 8));
-            assignLlm(bot, task);
-            return ok("assigned: " + task.name());
-        });
+                .build(),
+            (bot, args) -> { Task task = new LightAreaTask(optionalInt(args, "radius", 8), optionalInt(args, "max_torches", 8)); assignLlm(bot, task); return ok("assigned: " + task.name()); },
+            taskAsyncHandler(args -> new LightAreaTask(optionalInt(args, "radius", 8), optionalInt(args, "max_torches", 8))));
 
         register("follow", "Follow a player while keeping roughly 2-4 blocks of distance. Omit player_name to follow this bot's owner.", objectSchema()
                 .property("player_name", stringSchema("optional player name; defaults to owner"))
-                .build(), (bot, args) -> {
-            Task task = new FollowTask(optionalString(args, "player_name", ""));
-            assignLlm(bot, task);
-            return ok("assigned: " + task.name());
-        });
+                .build(),
+            (bot, args) -> { Task task = new FollowTask(optionalString(args, "player_name", "")); assignLlm(bot, task); return ok("assigned: " + task.name()); },
+            taskAsyncHandler(args -> new FollowTask(optionalString(args, "player_name", ""))));
 
-        register("hold", "Hold the current position until another task is assigned. DangerWatcher can still interrupt for survival threats.", objectSchema().build(), (bot, args) -> {
-            Task task = new HoldTask();
-            assignLlm(bot, task);
-            return ok("assigned: " + task.name());
-        });
+        register("hold", "Hold the current position until another task is assigned. DangerWatcher can still interrupt for survival threats.", objectSchema().build(),
+            (bot, args) -> { Task task = new HoldTask(); assignLlm(bot, task); return ok("assigned: " + task.name()); },
+            taskAsyncHandler(args -> new HoldTask()));
 
         register("guard", "Guard the current point, a coordinate, or a named player. Hostiles near the guard point are fought inline, then the bot returns.", objectSchema()
                 .property("player_name", stringSchema("optional player name to guard"))
                 .property("x", integerSchema("optional guard x"))
                 .property("y", integerSchema("optional guard y"))
                 .property("z", integerSchema("optional guard z"))
-                .build(), (bot, args) -> {
-            String playerName = optionalString(args, "player_name", "");
-            BlockPos point = optionalBlockPos(args, "x", "y", "z");
-            Task task = playerName.isBlank()
-                    ? GuardTask.point(point == null ? bot.getBlockPos() : point)
-                    : GuardTask.player(playerName);
-            assignLlm(bot, task);
-            return ok("assigned: " + task.name());
-        });
+                .build(),
+            (bot, args) -> {
+                String playerName = optionalString(args, "player_name", "");
+                BlockPos point = optionalBlockPos(args, "x", "y", "z");
+                Task task = playerName.isBlank() ? GuardTask.point(point == null ? bot.getBlockPos() : point) : GuardTask.player(playerName);
+                assignLlm(bot, task);
+                return ok("assigned: " + task.name());
+            },
+            (bot, args) -> {
+                String playerName = optionalString(args, "player_name", "");
+                BlockPos point = optionalBlockPos(args, "x", "y", "z");
+                Task task = playerName.isBlank() ? GuardTask.point(point == null ? bot.getBlockPos() : point) : GuardTask.player(playerName);
+                return taskAsyncHandler(ignored -> task).prepare(bot, args);
+            });
 
         register("farm", "Till soil, plant crops, harvest mature crops, and optionally keep tending the area. Supported crops: wheat, carrot, potato.", objectSchema()
                 .property("x", integerSchema("area center x"))
@@ -927,6 +1001,17 @@ public final class ToolRegistry {
         tools.put(name, new ToolDefinition(name, description, schema, handler, group));
     }
 
+    private void register(String name, String description, JsonObject schema,
+                          ToolDefinition.Handler syncHandler, ToolDefinition.AsyncHandler asyncHandler) {
+        tools.put(name, new ToolDefinition(name, description, schema, syncHandler, asyncHandler, ToolDefinition.Group.CORE));
+    }
+
+    private void register(String name, String description, JsonObject schema,
+                          ToolDefinition.Handler syncHandler, ToolDefinition.AsyncHandler asyncHandler,
+                          ToolDefinition.Group group) {
+        tools.put(name, new ToolDefinition(name, description, schema, syncHandler, asyncHandler, group));
+    }
+
     private static String craftPlanJson(CraftingHelper.CraftPlan plan) {
         JsonObject root = new JsonObject();
         root.addProperty("feasible", plan.success());
@@ -986,6 +1071,36 @@ public final class ToolRegistry {
 
     private static void assignLlm(AIPlayerEntity bot, Task task) {
         TaskManager.INSTANCE.assign(bot, task, TaskOrigin.of(TaskOrigin.Kind.LLM_TOOL, "llm_tool"));
+    }
+
+    /** 为任务类工具创建异步 handler：启动任务 → 等待完成 → 返回真实结果。 */
+    private static ToolDefinition.AsyncHandler taskAsyncHandler(java.util.function.Function<JsonObject, Task> taskFactory) {
+        return (bot, args) -> {
+            CompletableFuture<ToolDefinition.ToolResult> future = new CompletableFuture<>();
+            CompletableFuture<TaskStatus> taskFuture = TaskManager.INSTANCE.whenComplete(bot);
+            Task task = taskFactory.apply(args);
+            assignLlm(bot, task);
+            taskFuture.thenAccept(status ->
+                future.complete(status.state() == TaskState.COMPLETED
+                    ? ok(status.description())
+                    : fail(status.failureReason() != null ? status.failureReason() : "failed")));
+            return future;
+        };
+    }
+
+    /** 为目标类工具创建异步 handler：提交目标 → 等待完成 → 返回真实结果。 */
+    private static ToolDefinition.AsyncHandler goalAsyncHandler(java.util.function.BiFunction<AIPlayerEntity, JsonObject, Goal> goalFactory) {
+        return (bot, args) -> {
+            CompletableFuture<ToolDefinition.ToolResult> future = new CompletableFuture<>();
+            CompletableFuture<io.github.zoyluo.aibot.goal.GoalResult> goalFuture = GoalExecutor.INSTANCE.whenComplete(bot);
+            Goal goal = goalFactory.apply(bot, args);
+            GoalExecutor.INSTANCE.submit(bot, goal);
+            goalFuture.thenAccept(result ->
+                future.complete(result.status() == io.github.zoyluo.aibot.goal.GoalResult.Status.COMPLETED
+                    ? ok("goal_completed: " + GoalExecutor.INSTANCE.resultSummary(result))
+                    : fail(result.reason())));
+            return future;
+        };
     }
 
     private static BlockPos blockPos(JsonObject args) {
@@ -1162,6 +1277,18 @@ public final class ToolRegistry {
             }
         }
         return OreScan.COMMON_ORES;
+    }
+
+    private static String buildBlueprint(JsonObject args) {
+        boolean custom = args != null && (args.has("width") || args.has("depth") || args.has("height") || args.has("material"));
+        if (custom) {
+            int w = optionalInt(args, "width", 5);
+            int d = optionalInt(args, "depth", 5);
+            int h = optionalInt(args, "height", 3);
+            String material = optionalString(args, "material", "planks");
+            return "custom:" + w + "x" + d + "x" + h + ":" + material;
+        }
+        return optionalString(args, "blueprint", "small_hut");
     }
 
     private static String escape(String value) {

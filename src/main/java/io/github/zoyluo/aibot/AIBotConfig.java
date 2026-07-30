@@ -132,7 +132,7 @@ public record AIBotConfig(
                 OperatorCapabilities.defaults(),
                 new DeepSeek("", "https://api.deepseek.com", "deepseek-chat", 2048, 0.3D, 60, 3, 500),
                 new Perception(16, 20, 10, 10, false),
-                new Brain(36, 6, 12, false, true, false, 3, true), // 优化4:maxTurns 24→12——挖矿失败后大脑手动逐格挖会瞬间耗轮,早止损早复位(善后已有 clear+resetIdle)
+                new Brain(36, 6, 12, false, true, false, 3, true, 120),
                 new Watchdog(200),
                 new Logging(true, "logs/aibot", true, "daily", 50, 30, true, Map.of(
                         "LIFECYCLE", "INFO",
@@ -236,7 +236,8 @@ public record AIBotConfig(
             Boolean enableMemoryTools,
             Boolean enableCoordinationTools,
             int maxTaskRetries,
-            Boolean verboseReports
+            Boolean verboseReports,
+            int toolTimeoutSeconds
     ) {
         Brain withDefaults(Brain defaults) {
             return new Brain(
@@ -247,7 +248,8 @@ public record AIBotConfig(
                     boolOrDefault(enableMemoryTools, defaults.enableMemoryTools),
                     boolOrDefault(enableCoordinationTools, defaults.enableCoordinationTools),
                     positiveOrDefault(maxTaskRetries, defaults.maxTaskRetries),
-                    boolOrDefault(verboseReports, defaults.verboseReports));
+                    boolOrDefault(verboseReports, defaults.verboseReports),
+                    positiveOrDefault(toolTimeoutSeconds, defaults.toolTimeoutSeconds));
         }
 
         public boolean exposesLowLevelTools() {

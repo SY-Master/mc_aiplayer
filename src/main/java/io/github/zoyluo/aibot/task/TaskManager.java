@@ -14,6 +14,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.Set;
 
@@ -27,8 +29,20 @@ public final class TaskManager {
     private final Map<UUID, TaskStatus> lastStatus = new ConcurrentHashMap<>();
     private final Map<UUID, FailureRecord> lastFailure = new ConcurrentHashMap<>();
     private final Map<UUID, FailureRecord> pendingFailure = new ConcurrentHashMap<>();
+    private final Map<UUID, List<CompletableFuture<TaskStatus>>> completionFutures = new ConcurrentHashMap<>();
 
     private TaskManager() {
+    }
+
+    /**
+     * 注册任务完成回调，返回一个在任务进入终态(COMPLETED/FAILED/CANCELLED)时完成的 Future。
+     * 用于真同步工具调用：工具 handler 在服务器线程启动任务后，工作线程阻塞等待此 Future。
+     * 支持同一 bot 注册多个 future（多个工具依次调用场景），所有 pending future 在任务完成时一起触发。
+     */
+    public CompletableFuture<TaskStatus> whenComplete(AIPlayerEntity bot) {
+        CompletableFuture<TaskStatus> future = new CompletableFuture<>();
+        completionFutures.computeIfAbsent(bot.getUuid(), k -> new ArrayList<>()).add(future);
+        return future;
     }
 
     public void assign(AIPlayerEntity bot, Task task, TaskOrigin origin) {
@@ -108,6 +122,7 @@ public final class TaskManager {
         userPaused.remove(uuid);
         lastFailure.remove(uuid);
         pendingFailure.remove(uuid);
+        cancelFutures(uuid);
         lastStatus.put(uuid, TaskStatus.idle());
         BotReporter.INSTANCE.onStatus(bot.getServer(), bot, TaskStatus.idle());
     }
@@ -122,6 +137,7 @@ public final class TaskManager {
         userPaused.remove(uuid);
         boolean hadFailure = lastFailure.remove(uuid) != null;
         boolean hadPendingFailure = pendingFailure.remove(uuid) != null;
+        cancelFutures(uuid);
         if (current != null) {
             try {
                 current.cancel(bot, reason);
@@ -303,18 +319,21 @@ public final class TaskManager {
                 lastFailure.remove(uuid);
                 pendingFailure.remove(uuid);
                 BotLog.task(player, "task_completed", "name", task.name(), "elapsed_ticks", task.elapsedTicks());
+                completeFuture(uuid, status);
             } else if (task.state() == TaskState.FAILED) {
                 active.remove(uuid);
                 activeOrigins.remove(uuid);
                 recordFailure(player, task.name(), task.failureReason(), server.getTicks());
                 BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.TASK, player, "task_failed",
                         "name", task.name(), "reason", task.failureReason(), "elapsed_ticks", task.elapsedTicks());
+                completeFuture(uuid, status);
             } else if (task.state() == TaskState.CANCELLED) {
                 active.remove(uuid);
                 activeOrigins.remove(uuid);
                 lastFailure.remove(uuid);
                 pendingFailure.remove(uuid);
                 BotLog.task(player, "task_cancelled", "name", task.name(), "reason", task.failureReason());
+                completeFuture(uuid, status);
             }
         }
     }
@@ -360,6 +379,7 @@ public final class TaskManager {
         lastStatus.remove(bot.getUuid());
         lastFailure.remove(bot.getUuid());
         pendingFailure.remove(bot.getUuid());
+        cancelFutures(bot.getUuid());
         BotReporter.INSTANCE.onCleared(bot);
     }
 
@@ -371,10 +391,30 @@ public final class TaskManager {
         lastStatus.clear();
         lastFailure.clear();
         pendingFailure.clear();
+        completionFutures.values().forEach(list -> list.forEach(f -> f.cancel(false)));
+        completionFutures.clear();
     }
 
     public int activeCount() {
         return active.size();
+    }
+
+    private void completeFuture(UUID uuid, TaskStatus status) {
+        List<CompletableFuture<TaskStatus>> futures = completionFutures.remove(uuid);
+        if (futures != null) {
+            for (CompletableFuture<TaskStatus> f : futures) {
+                f.complete(status);
+            }
+        }
+    }
+
+    private void cancelFutures(UUID uuid) {
+        List<CompletableFuture<TaskStatus>> futures = completionFutures.remove(uuid);
+        if (futures != null) {
+            for (CompletableFuture<TaskStatus> f : futures) {
+                f.cancel(false);
+            }
+        }
     }
 
     private static boolean isCritical(Task task) {
