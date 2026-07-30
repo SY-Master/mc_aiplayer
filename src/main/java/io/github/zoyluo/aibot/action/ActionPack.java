@@ -12,8 +12,11 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 
 public final class ActionPack {
     private static final int PATHFIND_SUCCESS_COOLDOWN_TICKS = 5;
@@ -44,8 +47,36 @@ public final class ActionPack {
     private BlockPos activePathGoal;
     private int nextPathfindTick;
 
+    private final List<CompletableFuture<ActionResult>> actionFutures = new ArrayList<>();
+
     public ActionPack(AIPlayerEntity player) {
         this.player = player;
+    }
+
+    /**
+     * 注册动作完成回调，返回在未来动作（寻路/行走/挖掘）完成时触发的 Future。
+     * 所有已注册 future 在任意动作完成时一起触发（列表模式，支持顺序分发场景）。
+     */
+    public CompletableFuture<ActionResult> whenActionComplete() {
+        CompletableFuture<ActionResult> future = new CompletableFuture<>();
+        actionFutures.add(future);
+        return future;
+    }
+
+    private void fireActionComplete(ActionResult result) {
+        List<CompletableFuture<ActionResult>> pending = new ArrayList<>(actionFutures);
+        actionFutures.clear();
+        for (CompletableFuture<ActionResult> f : pending) {
+            f.complete(result);
+        }
+    }
+
+    public void cancelActionFutures() {
+        List<CompletableFuture<ActionResult>> pending = new ArrayList<>(actionFutures);
+        actionFutures.clear();
+        for (CompletableFuture<ActionResult> f : pending) {
+            f.cancel(false);
+        }
     }
 
     public AIPlayerEntity player() {
@@ -256,6 +287,7 @@ public final class ActionPack {
         this.walkTo = null;
         stopMovement();
         player.stopUsingItem();
+        cancelActionFutures();
     }
 
     public boolean hasActiveActions() {
@@ -341,6 +373,7 @@ public final class ActionPack {
         strafing = 0.0F;
         jumping = false;
         player.setJumping(false);
+        fireActionComplete(result);
     }
 
     private void tickPathExecutor() {
@@ -364,6 +397,7 @@ public final class ActionPack {
         strafing = 0.0F;
         jumping = false;
         player.setJumping(false);
+        fireActionComplete(result);
     }
 
     private void tickMining() {
@@ -382,6 +416,7 @@ public final class ActionPack {
             BotLog.warn(LogCategory.ERROR, player, "mine_failed", "reason", result.reason());
         }
         mining = null;
+        fireActionComplete(result);
     }
 
     private static float clampInput(float value) {

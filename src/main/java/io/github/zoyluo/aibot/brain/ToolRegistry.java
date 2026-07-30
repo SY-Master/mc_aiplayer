@@ -105,28 +105,46 @@ public final class ToolRegistry {
             return ok("looked");
         });
 
-        register("move_to", "Pathfind to a coordinate. Falls back to straight-line walking if pathfinding fails.", xyzSchema(), ToolDefinition.Group.LOW_LEVEL, (bot, args) -> {
-            BlockPos goal = blockPos(args);
-            io.github.zoyluo.aibot.action.ActionResult pathResult = MovementAction.startPathTo(bot, goal);
-            if (pathResult.isInProgress() || pathResult.isSuccess()) {
-                return ok("pathfinding_started");
-            }
-            io.github.zoyluo.aibot.action.ActionResult fallback = MovementAction.startWalkTo(bot, Vec3d.ofCenter(goal));
-            if (fallback.isInProgress() || fallback.isSuccess()) {
-                return ok("fallback_walk_started: " + pathResult.reason());
-            }
-            return fail("path_and_walk_both_failed: " + pathResult.reason());
-        });
+        register("move_to", "Pathfind to a coordinate. Falls back to straight-line walking if pathfinding fails.", xyzSchema(),
+            (bot, args) -> {
+                BlockPos goal = blockPos(args);
+                io.github.zoyluo.aibot.action.ActionResult pathResult = MovementAction.startPathTo(bot, goal);
+                if (pathResult.isInProgress() || pathResult.isSuccess()) return ok("pathfinding_started");
+                io.github.zoyluo.aibot.action.ActionResult fallback = MovementAction.startWalkTo(bot, Vec3d.ofCenter(goal));
+                return (fallback.isInProgress() || fallback.isSuccess()) ? ok("fallback_walk_started: " + pathResult.reason()) : fail("path_and_walk_both_failed: " + pathResult.reason());
+            },
+            (bot, args) -> {
+                CompletableFuture<ToolDefinition.ToolResult> future = new CompletableFuture<>();
+                BlockPos goal = blockPos(args);
+                io.github.zoyluo.aibot.action.ActionResult pathResult = MovementAction.startPathTo(bot, goal);
+                if (pathResult.isInProgress() || pathResult.isSuccess()) {
+                    bot.getActionPack().whenActionComplete().thenAccept(r ->
+                        future.complete(r.isSuccess() ? ok("arrived") : fail(r.reason())));
+                } else {
+                    io.github.zoyluo.aibot.action.ActionResult fallback = MovementAction.startWalkTo(bot, Vec3d.ofCenter(goal));
+                    if (fallback.isInProgress() || fallback.isSuccess()) {
+                        bot.getActionPack().whenActionComplete().thenAccept(r ->
+                            future.complete(r.isSuccess() ? ok("arrived") : fail(r.reason())));
+                    } else {
+                        future.complete(fail("path_and_walk_both_failed: " + pathResult.reason()));
+                    }
+                }
+                return future;
+            }, ToolDefinition.Group.LOW_LEVEL);
 
-        register("mine_block", "Low-level single-block break at given coords. Bot must already be within reach. For gathering materials or mining counts, prefer assign_task with task_type mine.", xyzSchema(), ToolDefinition.Group.LOW_LEVEL, (bot, args) -> {
-            BlockPos pos = blockPos(args);
-            MiningAction.startMining(bot, pos, Direction.getFacing(bot.getEyePos().subtract(pos.toCenterPos())));
-            return ok("started");
-        });
+        register("mine_block", "Low-level single-block break at given coords. Bot must already be within reach.", xyzSchema(),
+            (bot, args) -> { BlockPos pos = blockPos(args); MiningAction.startMining(bot, pos, Direction.getFacing(bot.getEyePos().subtract(pos.toCenterPos()))); return ok("started"); },
+            actionAsyncHandler((bot, args) -> {
+                BlockPos pos = blockPos(args);
+                MiningAction.startMining(bot, pos, Direction.getFacing(bot.getEyePos().subtract(pos.toCenterPos())));
+            }), ToolDefinition.Group.LOW_LEVEL);
 
-        register("place_block", "Low-level manual placement of the currently held block at given coords. For crafting table placement during recipes, prefer craft because it can place a held crafting table automatically.", xyzSchema(), ToolDefinition.Group.LOW_LEVEL, (bot, args) -> {
-            return result(BuildAction.placeBlockAt(bot, blockPos(args)));
-        });
+        register("place_block", "Low-level manual placement of the currently held block at given coords.", xyzSchema(),
+            (bot, args) -> result(BuildAction.placeBlockAt(bot, blockPos(args))),
+            (bot, args) -> {
+                io.github.zoyluo.aibot.action.ActionResult r = BuildAction.placeBlockAt(bot, blockPos(args));
+                return CompletableFuture.completedFuture(r.isSuccess() ? ok("placed") : fail(r.reason()));
+            }, ToolDefinition.Group.LOW_LEVEL);
 
         register("select_hotbar", "Select hotbar slot 0..8", objectSchema()
                 .property("slot", integerSchema("hotbar slot", 0, 8))
@@ -236,40 +254,29 @@ public final class ToolRegistry {
             return ok("marked_base: " + bot.getBlockPos().toShortString());
         });
 
-        register("deposit_all", "Deposit carried items into containers near the remembered base. Same items prefer containers that already contain them; all_except_tools defaults true.", objectSchema()
+        register("deposit_all", "Deposit carried items into containers near the remembered base.", objectSchema()
                 .property("all_except_tools", booleanSchema("deposit all non-damageable items and keep tools/equipment"))
-                .build(), (bot, args) -> {
-            Task task = new StockpileTask(optionalBoolean(args, "all_except_tools", true));
-            assignLlm(bot, task);
-            return ok("assigned: " + task.name());
-        });
+                .build(),
+            (bot, args) -> { Task task = new StockpileTask(optionalBoolean(args, "all_except_tools", true)); assignLlm(bot, task); return ok("assigned: " + task.name()); },
+            taskAsyncHandler(args -> new StockpileTask(optionalBoolean(args, "all_except_tools", true))));
 
-        register("strip_mine", "Mine a 2-high branch tunnel in a direction. Use this for ore blocks such as minecraft:iron_ore, not assign_task mine. If started above the target ore layer and no exposed ore is nearby, it first digs a descending stair shaft to the ore layer, then branches, follows veins, places torches, and can return to a depot chest when nearly full.", objectSchema()
+        register("strip_mine", "Mine a 2-high branch tunnel in a direction.", objectSchema()
                 .property("direction", stringSchema("north, south, east, or west"))
                 .property("length", integerSchema("main tunnel length"))
                 .property("spacing", integerSchema("branch spacing and branch depth"))
                 .property("depot_x", integerSchema("optional depot chest x"))
                 .property("depot_y", integerSchema("optional depot chest y"))
                 .property("depot_z", integerSchema("optional depot chest z"))
-                .property("target_ores", stringSchema("optional comma separated ore block ids; default is common ores"))
-                .build(), (bot, args) -> {
-            Task task = new StripMineTask(
-                    optionalDirection(args, "direction", Direction.NORTH),
-                    optionalInt(args, "length", 16),
-                    optionalInt(args, "spacing", 4),
-                    optionalBlockPos(args, "depot_x", "depot_y", "depot_z"),
-                    optionalBlocksCsv(args, "target_ores"));
-            assignLlm(bot, task);
-            return ok("assigned: " + task.name());
-        });
+                .property("target_ores", stringSchema("optional comma separated ore block ids"))
+                .build(),
+            (bot, args) -> { Task task = new StripMineTask(optionalDirection(args, "direction", Direction.NORTH), optionalInt(args, "length", 16), optionalInt(args, "spacing", 4), optionalBlockPos(args, "depot_x", "depot_y", "depot_z"), optionalBlocksCsv(args, "target_ores")); assignLlm(bot, task); return ok("assigned: " + task.name()); },
+            taskAsyncHandler(args -> new StripMineTask(optionalDirection(args, "direction", Direction.NORTH), optionalInt(args, "length", 16), optionalInt(args, "spacing", 4), optionalBlockPos(args, "depot_x", "depot_y", "depot_z"), optionalBlocksCsv(args, "target_ores"))));
 
-        register("mine_vein", "Mine the nearest visible ore vein in range using bounded BFS. Optional target_ores is a comma separated list of ore block ids.", objectSchema()
-                .property("target_ores", stringSchema("optional comma separated ore block ids; default is common ores"))
-                .build(), (bot, args) -> {
-            Task task = StripMineTask.mineNearbyVein(optionalBlocksCsv(args, "target_ores"));
-            assignLlm(bot, task);
-            return ok("assigned: " + task.name());
-        });
+        register("mine_vein", "Mine the nearest visible ore vein in range using bounded BFS.", objectSchema()
+                .property("target_ores", stringSchema("optional comma separated ore block ids"))
+                .build(),
+            (bot, args) -> { Task task = StripMineTask.mineNearbyVein(optionalBlocksCsv(args, "target_ores")); assignLlm(bot, task); return ok("assigned: " + task.name()); },
+            taskAsyncHandler(args -> StripMineTask.mineNearbyVein(optionalBlocksCsv(args, "target_ores"))));
 
         register("mine_ore", "PREFERRED way to obtain ores (e.g. minecraft:iron_ore or raw item minecraft:raw_iron). Starts a deterministic goal plan: prepare the required pickaxe first, then mine the ore. Do not manually break this into gather/craft/mine steps.", objectSchema()
                 .property("ore", stringSchema("ore block id or raw item, e.g. minecraft:iron_ore or minecraft:raw_iron"))
@@ -478,38 +485,27 @@ public final class ToolRegistry {
                 .map(pos -> ok("{\"x\":" + pos.getX() + ",\"y\":" + pos.getY() + ",\"z\":" + pos.getZ() + "}"))
                 .orElseGet(() -> fail("no_container")));
 
-        register("deposit", "Deposit items into a nearby or specified container. Use all_except_tools=true to store surplus materials while keeping damageable tools/equipment.", objectSchema()
-                .property("item", stringSchema("optional item id to deposit, for example minecraft:cobblestone"))
-                .property("count", integerSchema("optional item count; omit or <=0 means all matching items"))
+        register("deposit", "Deposit items into a nearby or specified container.", objectSchema()
+                .property("item", stringSchema("optional item id to deposit"))
+                .property("count", integerSchema("optional item count"))
                 .property("all_except_tools", booleanSchema("deposit all non-damageable items"))
                 .property("chest_x", integerSchema("optional container x"))
                 .property("chest_y", integerSchema("optional container y"))
                 .property("chest_z", integerSchema("optional container z"))
-                .build(), (bot, args) -> {
-            Task task = ContainerTask.deposit(
-                    optionalBlockPos(args, "chest_x", "chest_y", "chest_z"),
-                    optionalItem(args, "item"),
-                    optionalInt(args, "count", 0),
-                    optionalBoolean(args, "all_except_tools", false));
-            assignLlm(bot, task);
-            return ok("assigned: " + task.name());
-        });
+                .build(),
+            (bot, args) -> { Task task = ContainerTask.deposit(optionalBlockPos(args, "chest_x", "chest_y", "chest_z"), optionalItem(args, "item"), optionalInt(args, "count", 0), optionalBoolean(args, "all_except_tools", false)); assignLlm(bot, task); return ok("assigned: " + task.name()); },
+            taskAsyncHandler(args -> ContainerTask.deposit(optionalBlockPos(args, "chest_x", "chest_y", "chest_z"), optionalItem(args, "item"), optionalInt(args, "count", 0), optionalBoolean(args, "all_except_tools", false))));
 
         register("withdraw", "Withdraw a specific item count from a nearby or specified container", objectSchema()
-                .property("item", stringSchema("item id to withdraw, for example minecraft:cobblestone"))
+                .property("item", stringSchema("item id to withdraw"))
                 .property("count", integerSchema("count to withdraw"))
                 .property("chest_x", integerSchema("optional container x"))
                 .property("chest_y", integerSchema("optional container y"))
                 .property("chest_z", integerSchema("optional container z"))
                 .required("item")
-                .build(), (bot, args) -> {
-            Task task = ContainerTask.withdraw(
-                    optionalBlockPos(args, "chest_x", "chest_y", "chest_z"),
-                    requiredItem(args, "item"),
-                    optionalInt(args, "count", 1));
-            assignLlm(bot, task);
-            return ok("assigned: " + task.name());
-        });
+                .build(),
+            (bot, args) -> { Task task = ContainerTask.withdraw(optionalBlockPos(args, "chest_x", "chest_y", "chest_z"), requiredItem(args, "item"), optionalInt(args, "count", 1)); assignLlm(bot, task); return ok("assigned: " + task.name()); },
+            taskAsyncHandler(args -> ContainerTask.withdraw(optionalBlockPos(args, "chest_x", "chest_y", "chest_z"), requiredItem(args, "item"), optionalInt(args, "count", 1))));
 
         register("equip_armor", "Equip the best armor pieces from inventory and select the best weapon", objectSchema().build(), (bot, args) -> {
             int equipped = EquipAction.equipBestArmor(bot);
@@ -517,18 +513,13 @@ public final class ToolRegistry {
             return ok("equipped_armor_pieces: " + equipped);
         });
 
-        register("attack", "Start a deterministic combat task against nearby entities of a type. The bot equips armor and weapon, attacks on cooldown, and retreats at low health.", objectSchema()
+        register("attack", "Start a deterministic combat task against nearby entities of a type.", objectSchema()
                 .property("entity_type", stringSchema("entity type, for example minecraft:zombie"))
                 .property("count", integerSchema("number of kills"))
                 .required("entity_type")
-                .build(), (bot, args) -> {
-            Task task = new CombatTask(
-                    requiredEntityType(args, "entity_type"),
-                    optionalInt(args, "count", 1),
-                    io.github.zoyluo.aibot.AIBotConfig.get().combat().retreatHp());
-            assignLlm(bot, task);
-            return ok("assigned: " + task.name());
-        });
+                .build(),
+            (bot, args) -> { Task task = new CombatTask(requiredEntityType(args, "entity_type"), optionalInt(args, "count", 1), AIBotConfig.get().combat().retreatHp()); assignLlm(bot, task); return ok("assigned: " + task.name()); },
+            taskAsyncHandler(args -> new CombatTask(requiredEntityType(args, "entity_type"), optionalInt(args, "count", 1), AIBotConfig.get().combat().retreatHp())));
 
         register("sleep", "Find or place a bed, sleep through night, and wake up in the morning", objectSchema().build(),
             (bot, args) -> { Task task = new SleepTask(); assignLlm(bot, task); return ok("assigned: " + task.name()); },
@@ -571,70 +562,62 @@ public final class ToolRegistry {
                 return taskAsyncHandler(ignored -> task).prepare(bot, args);
             });
 
-        register("farm", "Till soil, plant crops, harvest mature crops, and optionally keep tending the area. Supported crops: wheat, carrot, potato.", objectSchema()
-                .property("x", integerSchema("area center x"))
-                .property("y", integerSchema("area center y"))
-                .property("z", integerSchema("area center z"))
-                .property("radius", integerSchema("area radius"))
-                .property("crop", stringSchema("wheat, carrot, or potato"))
-                .property("keep_tending", booleanSchema("keep surveying instead of completing after one pass"))
-                .required("x")
-                .required("y")
-                .required("z")
-                .required("crop")
-                .build(), (bot, args) -> {
-            FarmAction.CropSpec spec = FarmAction.cropSpec(requiredString(args, "crop"));
-            Task task = new FarmTask(blockPos(args), optionalInt(args, "radius", 3), spec.seed(), spec.crop(),
-                    optionalBoolean(args, "keep_tending", false), false);
-            assignLlm(bot, task);
-            return ok("assigned: " + task.name());
-        });
+        register("farm", "Till soil, plant crops, harvest mature crops. Supported crops: wheat, carrot, potato.", objectSchema()
+                .property("x", integerSchema("area center x")).property("y", integerSchema("area center y")).property("z", integerSchema("area center z"))
+                .property("radius", integerSchema("area radius")).property("crop", stringSchema("wheat, carrot, or potato"))
+                .property("keep_tending", booleanSchema("keep surveying"))
+                .required("x").required("y").required("z").required("crop")
+                .build(),
+            (bot, args) -> { FarmAction.CropSpec spec = FarmAction.cropSpec(requiredString(args, "crop")); Task task = new FarmTask(blockPos(args), optionalInt(args, "radius", 3), spec.seed(), spec.crop(), optionalBoolean(args, "keep_tending", false), false); assignLlm(bot, task); return ok("assigned: " + task.name()); },
+            taskAsyncHandler(args -> { FarmAction.CropSpec spec = FarmAction.cropSpec(requiredString(args, "crop")); return new FarmTask(blockPos(args), optionalInt(args, "radius", 3), spec.seed(), spec.crop(), optionalBoolean(args, "keep_tending", false), false); }));
 
-        register("harvest", "Harvest mature crops in an area without tilling or planting new empty soil. Supported crops: wheat, carrot, potato.", objectSchema()
-                .property("x", integerSchema("area center x"))
-                .property("y", integerSchema("area center y"))
-                .property("z", integerSchema("area center z"))
-                .property("radius", integerSchema("area radius"))
-                .property("crop", stringSchema("wheat, carrot, or potato"))
-                .required("x")
-                .required("y")
-                .required("z")
-                .required("crop")
-                .build(), (bot, args) -> {
-            FarmAction.CropSpec spec = FarmAction.cropSpec(requiredString(args, "crop"));
-            Task task = new FarmTask(blockPos(args), optionalInt(args, "radius", 3), spec.seed(), spec.crop(), false, true);
-            assignLlm(bot, task);
-            return ok("assigned: " + task.name());
-        });
+        register("harvest", "Harvest mature crops in an area without tilling. Supported crops: wheat, carrot, potato.", objectSchema()
+                .property("x", integerSchema("area center x")).property("y", integerSchema("area center y")).property("z", integerSchema("area center z"))
+                .property("radius", integerSchema("area radius")).property("crop", stringSchema("wheat, carrot, or potato"))
+                .required("x").required("y").required("z").required("crop")
+                .build(),
+            (bot, args) -> { FarmAction.CropSpec spec = FarmAction.cropSpec(requiredString(args, "crop")); Task task = new FarmTask(blockPos(args), optionalInt(args, "radius", 3), spec.seed(), spec.crop(), false, true); assignLlm(bot, task); return ok("assigned: " + task.name()); },
+            taskAsyncHandler(args -> { FarmAction.CropSpec spec = FarmAction.cropSpec(requiredString(args, "crop")); return new FarmTask(blockPos(args), optionalInt(args, "radius", 3), spec.seed(), spec.crop(), false, true); }));
 
-        register("breed", "Feed two nearby adult animals of the requested type to breed them. Supported examples: minecraft:cow, minecraft:sheep, minecraft:pig, minecraft:chicken.", objectSchema()
+        register("breed", "Feed two nearby adult animals of the requested type to breed them.", objectSchema()
                 .property("entity_type", stringSchema("entity type, for example minecraft:cow"))
                 .property("pairs", integerSchema("number of pairs to breed"))
                 .required("entity_type")
-                .build(), (bot, args) -> {
-            Task task = new BreedTask(requiredEntityType(args, "entity_type"), optionalInt(args, "pairs", 1));
-            assignLlm(bot, task);
-            return ok("assigned: " + task.name());
-        });
+                .build(),
+            (bot, args) -> { Task task = new BreedTask(requiredEntityType(args, "entity_type"), optionalInt(args, "pairs", 1)); assignLlm(bot, task); return ok("assigned: " + task.name()); },
+            taskAsyncHandler(args -> new BreedTask(requiredEntityType(args, "entity_type"), optionalInt(args, "pairs", 1))));
 
         register("attack_entity", "Attack a nearby entity by type", objectSchema()
                 .property("entity_type", stringSchema("entity type, for example minecraft:cow"))
                 .required("entity_type")
-                .build(), ToolDefinition.Group.LOW_LEVEL, (bot, args) -> {
-            String entityType = requiredString(args, "entity_type");
-            Identifier id = Identifier.of(entityType);
-            CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "tool_attack_entity");
-            Optional<Entity> target = bot.getServerWorld()
-                    .getOtherEntities(bot, bot.getBoundingBox().expand(4.5D),
-                            entity -> Registries.ENTITY_TYPE.getId(entity.getType()).equals(id)
-                                    && ObservableWorldQuery.canObserveEntity(bot, entity))
-                    .stream()
-                    .min(Comparator.comparingDouble(bot::distanceTo));
-            if (target.isEmpty()) {
-                return fail("no_nearby_entity: " + entityType);
-            }
-            return result(InteractAction.attackEntity(bot, target.get()));
-        });
+                .build(),
+            (bot, args) -> {
+                String entityType = requiredString(args, "entity_type");
+                Identifier id = Identifier.of(entityType);
+                CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "tool_attack_entity");
+                Optional<Entity> target = bot.getServerWorld()
+                        .getOtherEntities(bot, bot.getBoundingBox().expand(4.5D),
+                                entity -> Registries.ENTITY_TYPE.getId(entity.getType()).equals(id)
+                                        && ObservableWorldQuery.canObserveEntity(bot, entity))
+                        .stream()
+                        .min(Comparator.comparingDouble(bot::distanceTo));
+                if (target.isEmpty()) return fail("no_nearby_entity: " + entityType);
+                return result(InteractAction.attackEntity(bot, target.get()));
+            },
+            (bot, args) -> {
+                String entityType = requiredString(args, "entity_type");
+                Identifier id = Identifier.of(entityType);
+                CapabilityRuntime.decide(bot, PrivilegedCapability.HIDDEN_BLOCK_SCAN, "tool_attack_entity");
+                Optional<Entity> target = bot.getServerWorld()
+                        .getOtherEntities(bot, bot.getBoundingBox().expand(4.5D),
+                                entity -> Registries.ENTITY_TYPE.getId(entity.getType()).equals(id)
+                                        && ObservableWorldQuery.canObserveEntity(bot, entity))
+                        .stream()
+                        .min(Comparator.comparingDouble(bot::distanceTo));
+                if (target.isEmpty()) return CompletableFuture.completedFuture(fail("no_nearby_entity: " + entityType));
+                io.github.zoyluo.aibot.action.ActionResult r = InteractAction.attackEntity(bot, target.get());
+                return CompletableFuture.completedFuture(r.isSuccess() ? ok("attacked") : fail(r.reason()));
+            }, ToolDefinition.Group.LOW_LEVEL);
 
         register("stop", "Cancel the current mission/task but preserve explicitly queued missions. Use immediately before a replacement goal.", objectSchema().build(), (bot, args) -> {
             IntentControlTransaction.Outcome outcome = IntentController.INSTANCE.cancelCurrent(
@@ -760,81 +743,85 @@ public final class ToolRegistry {
         register("goto_place", "Assign a move task to a remembered named place in the current dimension", objectSchema()
                 .property("name", stringSchema("place name"))
                 .required("name")
-                .build(), ToolDefinition.Group.MEMORY, (bot, args) -> {
-            Optional<BotMemory.Place> place = BotMemoryStore.INSTANCE.of(bot.getUuid()).place(requiredString(args, "name"));
-            if (place.isEmpty()) {
-                return fail("unknown_place: " + requiredString(args, "name"));
-            }
-            if (!bot.getServerWorld().getRegistryKey().getValue().toString().equals(place.get().dimension())) {
-                return fail("place_in_other_dimension: " + place.get().dimension());
-            }
-            Task task = new MoveTask(bot, place.get().pos());
-            assignLlm(bot, task);
-            return ok("assigned: " + task.name());
-        });
+                .build(),
+            (bot, args) -> {
+                Optional<BotMemory.Place> place = BotMemoryStore.INSTANCE.of(bot.getUuid()).place(requiredString(args, "name"));
+                if (place.isEmpty()) return fail("unknown_place: " + requiredString(args, "name"));
+                if (!bot.getServerWorld().getRegistryKey().getValue().toString().equals(place.get().dimension())) return fail("place_in_other_dimension: " + place.get().dimension());
+                Task task = new MoveTask(bot, place.get().pos()); assignLlm(bot, task); return ok("assigned: " + task.name());
+            },
+            (bot, args) -> {
+                Optional<BotMemory.Place> place = BotMemoryStore.INSTANCE.of(bot.getUuid()).place(requiredString(args, "name"));
+                if (place.isEmpty()) return CompletableFuture.completedFuture(fail("unknown_place: " + requiredString(args, "name")));
+                if (!bot.getServerWorld().getRegistryKey().getValue().toString().equals(place.get().dimension())) return CompletableFuture.completedFuture(fail("place_in_other_dimension: " + place.get().dimension()));
+                return taskAsyncHandler(ignored -> new MoveTask(bot, place.get().pos())).prepare(bot, args);
+            }, ToolDefinition.Group.MEMORY);
 
-        register("resume_mining", "Continue mining where the last mining session left off: walks back to the remembered mine face and mines the same ore kinds. Use when the player says things like '继续挖矿'/'接着挖'.", objectSchema()
+        register("resume_mining", "Continue mining where the last mining session left off.", objectSchema()
                 .property("count", integerSchema("how many more ore blocks to mine, default 8"))
-                .build(), (bot, args) -> {
-            var mem = BotMemoryStore.INSTANCE.of(bot.getUuid());
-            var face = mem.place("mine_face");
-            if (face.isEmpty()) {
-                return fail("no_mine_face: 没有上次挖矿的作业面记录");
-            }
-            if (!bot.getServerWorld().getRegistryKey().getValue().toString().equals(face.get().dimension())) {
-                return fail("mine_face_in_other_dimension");
-            }
-            java.util.Set<net.minecraft.block.Block> ores = new java.util.HashSet<>();
-            mem.recall("mine_face_ores").ifPresent(csv -> {
-                for (String id : csv.split(",")) {
-                    var block = net.minecraft.registry.Registries.BLOCK
-                            .get(net.minecraft.util.Identifier.of(id.trim()));
-                    if (block != net.minecraft.block.Blocks.AIR) {
-                        ores.add(block);
-                    }
-                }
+                .build(),
+            (bot, args) -> {
+                var mem = BotMemoryStore.INSTANCE.of(bot.getUuid());
+                var face = mem.place("mine_face");
+                if (face.isEmpty()) return fail("no_mine_face");
+                if (!bot.getServerWorld().getRegistryKey().getValue().toString().equals(face.get().dimension())) return fail("mine_face_in_other_dimension");
+                java.util.Set<net.minecraft.block.Block> ores = resumeOres(mem);
+                Task back = new MoveTask(bot, face.get().pos()); assignLlm(bot, back);
+                GoalExecutor.INSTANCE.submit(bot, new Goal.MineOre(ores.isEmpty() ? java.util.Set.of(net.minecraft.block.Blocks.IRON_ORE) : ores, optionalInt(args, "count", 8)));
+                return ok("resuming at " + face.get().pos().toShortString());
+            },
+            (bot, args) -> {
+                var mem = BotMemoryStore.INSTANCE.of(bot.getUuid());
+                var face = mem.place("mine_face");
+                if (face.isEmpty()) return CompletableFuture.completedFuture(fail("no_mine_face"));
+                if (!bot.getServerWorld().getRegistryKey().getValue().toString().equals(face.get().dimension())) return CompletableFuture.completedFuture(fail("mine_face_in_other_dimension"));
+                java.util.Set<net.minecraft.block.Block> ores = resumeOres(mem);
+                // 先走回作业面，走完后 goal 会自动接续
+                Task back = new MoveTask(bot, face.get().pos()); assignLlm(bot, back);
+                GoalExecutor.INSTANCE.submit(bot, new Goal.MineOre(ores.isEmpty() ? java.util.Set.of(net.minecraft.block.Blocks.IRON_ORE) : ores, optionalInt(args, "count", 8)));
+                // 等待 goal 完成（move 完成后 goal 自动出队执行）
+                CompletableFuture<ToolDefinition.ToolResult> future = new CompletableFuture<>();
+                GoalExecutor.INSTANCE.whenComplete(bot).thenAccept(result ->
+                    future.complete(result.status() == io.github.zoyluo.aibot.goal.GoalResult.Status.COMPLETED ? ok("resume_completed") : fail(result.reason())));
+                return future;
             });
-            // 队列接力:先走回作业面,再原矿种续挖(goal 队列自动衔接,中途打断也能再续)。
-            Task back = new MoveTask(bot, face.get().pos());
-            assignLlm(bot, back);
-            GoalExecutor.INSTANCE.submit(bot, new Goal.MineOre(
-                    ores.isEmpty() ? java.util.Set.of(net.minecraft.block.Blocks.IRON_ORE) : ores,
-                    optionalInt(args, "count", 8)));
-            return ok("resuming at " + face.get().pos().toShortString());
-        });
 
-        register("mine_and_stockpile", "Mine ores then deposit the yield into a chest near the remembered base. Use when the player wants mined goods stored, not carried.", objectSchema()
+        register("mine_and_stockpile", "Mine ores then deposit the yield into a chest near the remembered base.", objectSchema()
                 .property("ore", stringSchema("ore block id or raw item, e.g. minecraft:iron_ore"))
                 .property("count", integerSchema("how many ore blocks to mine"))
                 .required("ore")
-                .build(), (bot, args) -> {
-            var ores = oreTargetsFrom(requiredString(args, "ore"));
-            int count = optionalInt(args, "count", 1);
-            boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.MineOre(ores, count));
-            if (!started) {
-                return fail("goal_plan_failed");
-            }
-            // 归仓接力:goal 队列自动衔接(挖完即去基地箱入库;无 base 时 Stockpile 自己报 no_base)
-            Item yield = io.github.zoyluo.aibot.action.HarvestCore.expectedDropsFor(ores)
-                    .stream().findFirst().orElse(null);
-            if (yield != null) {
-                GoalExecutor.INSTANCE.submit(bot, new Goal.Stockpile(yield, count));
-            }
-            return ok("goal_assigned: mine_ore + stockpile queued");
-        });
+                .build(),
+            (bot, args) -> {
+                var ores = oreTargetsFrom(requiredString(args, "ore"));
+                int count = optionalInt(args, "count", 1);
+                boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.MineOre(ores, count));
+                if (!started) return fail("goal_plan_failed");
+                Item yield = io.github.zoyluo.aibot.action.HarvestCore.expectedDropsFor(ores).stream().findFirst().orElse(null);
+                if (yield != null) GoalExecutor.INSTANCE.submit(bot, new Goal.Stockpile(yield, count));
+                return ok("goal_assigned: mine_ore + stockpile queued");
+            },
+            goalAsyncHandler((bot, args) -> {
+                var ores = oreTargetsFrom(requiredString(args, "ore"));
+                int count = optionalInt(args, "count", 1);
+                Item yield = io.github.zoyluo.aibot.action.HarvestCore.expectedDropsFor(ores).stream().findFirst().orElse(null);
+                if (yield != null) GoalExecutor.INSTANCE.submit(bot, new Goal.Stockpile(yield, count));
+                return new Goal.MineOre(ores, count);
+            }));
 
         register("recover_drops", "Run back to the most recent death location and pick up dropped items before they despawn (5 min)", objectSchema()
-                .build(), ToolDefinition.Group.MEMORY, (bot, args) -> {
-            var deaths = io.github.zoyluo.aibot.memory.EpisodeLog.INSTANCE
-                    .recentOfType(bot.getUuid(), io.github.zoyluo.aibot.memory.EpisodeLog.Type.DEATH, 1);
-            if (deaths.isEmpty()) {
-                return fail("no_recent_death");
-            }
-            var death = deaths.get(0);
-            Task task = new io.github.zoyluo.aibot.task.RecoverDropsTask(death.pos(), death.gameTick());
-            assignLlm(bot, task);
-            return ok("assigned: recover_drops -> " + death.pos().toShortString());
-        });
+                .build(),
+            (bot, args) -> {
+                var deaths = io.github.zoyluo.aibot.memory.EpisodeLog.INSTANCE.recentOfType(bot.getUuid(), io.github.zoyluo.aibot.memory.EpisodeLog.Type.DEATH, 1);
+                if (deaths.isEmpty()) return fail("no_recent_death");
+                var death = deaths.get(0);
+                Task task = new io.github.zoyluo.aibot.task.RecoverDropsTask(death.pos(), death.gameTick()); assignLlm(bot, task); return ok("assigned: recover_drops -> " + death.pos().toShortString());
+            },
+            (bot, args) -> {
+                var deaths = io.github.zoyluo.aibot.memory.EpisodeLog.INSTANCE.recentOfType(bot.getUuid(), io.github.zoyluo.aibot.memory.EpisodeLog.Type.DEATH, 1);
+                if (deaths.isEmpty()) return CompletableFuture.completedFuture(fail("no_recent_death"));
+                var death = deaths.get(0);
+                return taskAsyncHandler(ignored -> new io.github.zoyluo.aibot.task.RecoverDropsTask(death.pos(), death.gameTick())).prepare(bot, args);
+            }, ToolDefinition.Group.MEMORY);
 
         register("set_goal", "Set a persistent long-term goal with ordered steps. Steps should be an array of short strings.", objectSchema()
                 .property("title", stringSchema("goal title"))
@@ -854,41 +841,49 @@ public final class ToolRegistry {
         register("goal_status", "Get the current persistent long-term goal status", objectSchema().build(), ToolDefinition.Group.MEMORY, (bot, args) ->
                 ok(BotMemoryStore.INSTANCE.of(bot.getUuid()).goalStatus("")));
 
-        register("assign_task", "Start a high-level deterministic task for the bot. Prefer this for movement, gathering, foraging, mining, combat, building, sleep, lighting, farming, fishing, trading, breeding, and container work. Use dedicated craft, eat, and smelt tools for those actions. For exposed surface blocks use task_type=mine. To obtain ores (iron/coal/copper/gold/diamond, *_ore, or raw_*), use the dedicated mine_ore tool which auto-locates the nearest ore and mines it directly — do NOT use strip_mine for getting ore. Supersedes any current task. Build params: blueprint plus optional anchor_x/anchor_y/anchor_z, auto_site, and flatten. x/y/z aliases are accepted; omit anchor when auto_site=true.", objectSchema()
+        register("assign_task", "Start a high-level deterministic task for the bot. Prefer dedicated tools (craft/eat/smelt/mine_ore/achieve_goal) when available. Supersedes any current task.", objectSchema()
                 .property("task_type", stringSchema("move, gather, forage, irrigate, milk_cow, raid_crops, attack, mine, strip_mine, mine_vein, build, sleep, light_area, farm, harvest, fish, trade, breed, follow, hold, guard, deposit, stockpile, or withdraw"))
                 .property("params", objectSchema().build())
                 .required("task_type")
                 .required("params")
-                .build(), (bot, args) -> {
-            String taskType = requiredString(args, "task_type");
-            JsonObject params = args.getAsJsonObject("params");
-            if ("mine_ore".equals(taskType)) {
-                if (!AIBotConfig.get().goal().autoToolFillEnabled()) {
-                    Task task = new OreDigTask(oreTargetsFrom(requiredString(params, "ore")), optionalInt(params, "count", 1));
-                    assignLlm(bot, task);
-                    return ok("assigned: " + task.name());
+                .build(),
+            (bot, args) -> {
+                String taskType = requiredString(args, "task_type");
+                JsonObject params = args.getAsJsonObject("params");
+                if ("mine_ore".equals(taskType)) {
+                    if (!AIBotConfig.get().goal().autoToolFillEnabled()) { Task t = new OreDigTask(oreTargetsFrom(requiredString(params, "ore")), optionalInt(params, "count", 1)); assignLlm(bot, t); return ok("assigned: " + t.name()); }
+                    boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.MineOre(oreTargetsFrom(requiredString(params, "ore")), optionalInt(params, "count", 1)));
+                    return started ? ok("goal_assigned: mine_ore") : fail("goal_plan_failed");
                 }
-                boolean started = GoalExecutor.INSTANCE.submit(bot,
-                        new Goal.MineOre(oreTargetsFrom(requiredString(params, "ore")), optionalInt(params, "count", 1)));
-                return started ? ok("goal_assigned: mine_ore") : fail("goal_plan_failed");
-            }
-            if ("mine".equals(taskType)) {
-                Block block = blockWithAlias(params, "block", "block_type");
-                if (OreScan.isOreBlock(block)) {
+                if ("mine".equals(taskType) && OreScan.isOreBlock(blockWithAlias(params, "block", "block_type"))) {
+                    Block block = blockWithAlias(params, "block", "block_type");
                     int count = optionalInt(params, "count", 1);
-                    if (!AIBotConfig.get().goal().autoToolFillEnabled()) {
-                        Task task = new OreDigTask(OreScan.oreFamily(block), count);
-                        assignLlm(bot, task);
-                        return ok("assigned: " + task.name());
-                    }
+                    if (!AIBotConfig.get().goal().autoToolFillEnabled()) { Task t = new OreDigTask(OreScan.oreFamily(block), count); assignLlm(bot, t); return ok("assigned: " + t.name()); }
                     boolean started = GoalExecutor.INSTANCE.submit(bot, new Goal.MineOre(OreScan.oreFamily(block), count));
                     return started ? ok("goal_assigned: mine_ore") : fail("goal_plan_failed");
                 }
-            }
-            Task task = createTask(bot, taskType, params);
-            assignLlm(bot, task);
-            return ok("assigned: " + task.name());
-        });
+                Task task = createTask(bot, taskType, params); assignLlm(bot, task); return ok("assigned: " + task.name());
+            },
+            (bot, args) -> {
+                String taskType = requiredString(args, "task_type");
+                JsonObject params = args.getAsJsonObject("params");
+                if ("mine_ore".equals(taskType) || ("mine".equals(taskType) && OreScan.isOreBlock(blockWithAlias(params, "block", "block_type")))) {
+                    // Goal 路径：等待 GoalExecutor 完成
+                    CompletableFuture<ToolDefinition.ToolResult> future = new CompletableFuture<>();
+                    CompletableFuture<io.github.zoyluo.aibot.goal.GoalResult> goalFuture = GoalExecutor.INSTANCE.whenComplete(bot);
+                    Goal goal;
+                    if ("mine_ore".equals(taskType)) {
+                        goal = new Goal.MineOre(oreTargetsFrom(requiredString(params, "ore")), optionalInt(params, "count", 1));
+                    } else {
+                        goal = new Goal.MineOre(OreScan.oreFamily(blockWithAlias(params, "block", "block_type")), optionalInt(params, "count", 1));
+                    }
+                    GoalExecutor.INSTANCE.submit(bot, goal);
+                    goalFuture.thenAccept(result -> future.complete(result.status() == io.github.zoyluo.aibot.goal.GoalResult.Status.COMPLETED ? ok("goal_completed") : fail(result.reason())));
+                    return future;
+                }
+                // Task 路径：等待 TaskManager 完成
+                return taskAsyncHandler(ignored -> createTask(bot, taskType, params)).prepare(bot, args);
+            });
 
         register("get_task_status", "Get the current task status", objectSchema().build(), (bot, args) -> {
             // 优化3:有确定性目标在跑时不喂详细状态——断掉大脑反复轮询的正反馈(实测 get_task_status×19 耗尽轮次);
@@ -1088,6 +1083,20 @@ public final class ToolRegistry {
         };
     }
 
+    /** 为动作类工具创建异步 handler：启动 ActionPack 动作 → 等待完成 → 返回真实结果。 */
+    private static ToolDefinition.AsyncHandler actionAsyncHandler(java.util.function.BiConsumer<AIPlayerEntity, JsonObject> actionStarter) {
+        return (bot, args) -> {
+            CompletableFuture<ToolDefinition.ToolResult> future = new CompletableFuture<>();
+            CompletableFuture<io.github.zoyluo.aibot.action.ActionResult> actionFuture = bot.getActionPack().whenActionComplete();
+            actionStarter.accept(bot, args);
+            actionFuture.thenAccept(result ->
+                future.complete(result.isSuccess()
+                    ? ok(result.status().name().toLowerCase())
+                    : fail(result.reason())));
+            return future;
+        };
+    }
+
     /** 为目标类工具创建异步 handler：提交目标 → 等待完成 → 返回真实结果。 */
     private static ToolDefinition.AsyncHandler goalAsyncHandler(java.util.function.BiFunction<AIPlayerEntity, JsonObject, Goal> goalFactory) {
         return (bot, args) -> {
@@ -1277,6 +1286,17 @@ public final class ToolRegistry {
             }
         }
         return OreScan.COMMON_ORES;
+    }
+
+    private static java.util.Set<Block> resumeOres(BotMemory mem) {
+        java.util.Set<Block> ores = new java.util.HashSet<>();
+        mem.recall("mine_face_ores").ifPresent(csv -> {
+            for (String id : csv.split(",")) {
+                var block = net.minecraft.registry.Registries.BLOCK.get(net.minecraft.util.Identifier.of(id.trim()));
+                if (block != net.minecraft.block.Blocks.AIR) ores.add(block);
+            }
+        });
+        return ores;
     }
 
     private static String buildBlueprint(JsonObject args) {
