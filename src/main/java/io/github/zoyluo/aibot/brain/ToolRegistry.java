@@ -63,7 +63,9 @@ import net.minecraft.registry.Registries;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
+import net.minecraft.registry.tag.BiomeTags;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.biome.Biome;
 
 import java.util.Comparator;
 import java.util.HashSet;
@@ -156,6 +158,24 @@ public final class ToolRegistry {
 
         register("inventory", "Get the bot's current inventory", objectSchema().build(), (bot, args) ->
                 ok(InventoryAction.summarize(bot).toString()));
+
+        register("check_biome", "Query the current biome where the bot is standing. Returns biome id and relevant biome tags (IS_FOREST, IS_OCEAN, etc.). Use this BEFORE committing to long-distance resource gathering if the biome may not contain the needed resources.", objectSchema().build(), (bot, args) -> {
+            var entry = bot.getServerWorld().getBiome(bot.getBlockPos());
+            String biomeId = entry.getKeyOrValue()
+                    .map(key -> key.getValue().toString(), b -> "unregistered");
+            StringBuilder tags = new StringBuilder();
+            checkTag(entry, BiomeTags.IS_FOREST, "IS_FOREST", tags);
+            checkTag(entry, BiomeTags.IS_OCEAN, "IS_OCEAN", tags);
+            checkTag(entry, BiomeTags.IS_DEEP_OCEAN, "IS_DEEP_OCEAN", tags);
+            checkTag(entry, BiomeTags.IS_BEACH, "IS_BEACH", tags);
+            checkTag(entry, BiomeTags.IS_BADLANDS, "IS_BADLANDS", tags);
+            checkTag(entry, BiomeTags.IS_MOUNTAIN, "IS_MOUNTAIN", tags);
+            checkTag(entry, BiomeTags.IS_RIVER, "IS_RIVER", tags);
+            checkTag(entry, BiomeTags.IS_TAIGA, "IS_TAIGA", tags);
+            checkTag(entry, BiomeTags.IS_JUNGLE, "IS_JUNGLE", tags);
+            return ok("{\"biome\":\"" + escape(biomeId)
+                    + "\",\"tags\":[" + tags + "]}");
+        });
 
         register("equip_best_tool", "Equip the best available tool for breaking a block type", objectSchema()
                 .property("block", stringSchema("block id, for example minecraft:stone"))
@@ -1146,6 +1166,18 @@ public final class ToolRegistry {
 
     private static String escape(String value) {
         return value.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
+    private static void checkTag(net.minecraft.registry.entry.RegistryEntry<Biome> entry,
+                                  net.minecraft.registry.tag.TagKey<Biome> tag,
+                                  String name,
+                                  StringBuilder out) {
+        if (entry.isIn(tag)) {
+            if (!out.isEmpty()) {
+                out.append(",");
+            }
+            out.append("\"").append(name).append("\"");
+        }
     }
 
     private static JsonObject xyzSchema() {
