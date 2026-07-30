@@ -20,6 +20,7 @@ import io.github.zoyluo.aibot.craft.CraftingHelper;
 import io.github.zoyluo.aibot.goal.Goal;
 import io.github.zoyluo.aibot.goal.GoalExecutor;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
+import io.github.zoyluo.aibot.log.BotLog;
 import io.github.zoyluo.aibot.manager.AIPlayerManager;
 import io.github.zoyluo.aibot.memory.BotMemory;
 import io.github.zoyluo.aibot.memory.BotMemoryStore;
@@ -509,8 +510,8 @@ public final class ToolRegistry {
                 .property("count", integerSchema("number of kills"))
                 .required("entity_type")
                 .build(),
-            (bot, args) -> { Task task = new CombatTask(requiredEntityType(args, "entity_type"), optionalInt(args, "count", 1), AIBotConfig.get().combat().retreatHp()); assignLlm(bot, task); return ok("assigned: " + task.name()); },
-            taskAsyncHandler(args -> new CombatTask(requiredEntityType(args, "entity_type"), optionalInt(args, "count", 1), AIBotConfig.get().combat().retreatHp())));
+            (bot, args) -> { Task task = new CombatTask(requiredEntityType(args, "entity_type"), optionalInt(args, "count", 1), DangerPolicyStore.INSTANCE.resolve(bot).retreatHp()); assignLlm(bot, task); return ok("assigned: " + task.name()); },
+            (bot, args) -> { Task task = new CombatTask(requiredEntityType(args, "entity_type"), optionalInt(args, "count", 1), DangerPolicyStore.INSTANCE.resolve(bot).retreatHp()); return taskAsyncHandler(ignored -> task).prepare(bot, args); });
 
         register("sleep", "Find or place a bed, sleep through night, and wake up in the morning", objectSchema().build(),
             (bot, args) -> { Task task = new SleepTask(); assignLlm(bot, task); return ok("assigned: " + task.name()); },
@@ -634,6 +635,47 @@ public final class ToolRegistry {
                     bot, IntentController.ControlOrigin.LLM_TOOL, "tool_cancel_all");
             return ok(outcome.changed() ? "cancelled_all" : "already_idle");
         });
+
+        register("set_danger_policy", "Configure this bot's autonomous danger-response policy (persisted to the world save; takes effect immediately). "
+                + "mode: auto = default heuristic (fight when winnable, otherwise evade or shelter at night); "
+                + "fight = engage whenever armed, the target is not a creeper, and hp is above retreat_hp (ignores the max_enemies cap; falls back to evade/shelter if those fail); "
+                + "flee = never fight, only evade or shelter; off = disable all autonomous responses to monsters so the current task keeps running. "
+                + "retreat_hp (1-20): hp at or below which combat is refused or retreated from. "
+                + "max_enemies (0-20): max nearby hostiles the bot will engage in auto mode; 0 means never fight. "
+                + "keep_survival (default true): set false to disable survival tripwires (drowning/on-fire/low-hp task aborts), the lava-escape task and emergency shelter — "
+                + "the basic stuck-in-lava/drowning movement rescue and death respawn always stay on, but the bot may take damage or die. "
+                + "Omitted fields keep their current values; sending mode=auto with everything omitted resets to server defaults.", objectSchema()
+                .property("mode", stringSchema("auto, fight, flee, or off"))
+                .property("retreat_hp", integerSchema("refuse or retreat from combat at or below this hp", 1, 20))
+                .property("max_enemies", integerSchema("max hostiles to engage in auto mode; 0 never fights", 0, 20))
+                .property("keep_survival", booleanSchema("keep survival tripwires, lava-escape task and emergency shelter"))
+                .build(), (bot, args) -> {
+            String rawMode = optionalString(args, "mode", "");
+            DangerPolicy.Mode mode = rawMode.isEmpty() ? null : DangerPolicy.parseMode(rawMode);
+            Integer retreatHp = args.has("retreat_hp") && args.get("retreat_hp").isJsonPrimitive()
+                    ? DangerPolicy.validateRetreatHp(args.get("retreat_hp").getAsInt()) : null;
+            Integer maxEnemies = args.has("max_enemies") && args.get("max_enemies").isJsonPrimitive()
+                    ? DangerPolicy.validateMaxEnemies(args.get("max_enemies").getAsInt()) : null;
+            Boolean keepSurvival = args.has("keep_survival") && args.get("keep_survival").isJsonPrimitive()
+                    ? args.get("keep_survival").getAsBoolean() : null;
+            // mode=auto 且其余全省略 = 显式重置回默认(删条目+存档键);否则增量合并
+            DangerPolicy policy = (mode == DangerPolicy.Mode.AUTO && retreatHp == null && maxEnemies == null && keepSurvival == null)
+                    ? DangerPolicyStore.INSTANCE.reset(bot.getUuid())
+                    : DangerPolicyStore.INSTANCE.update(bot.getUuid(), mode, retreatHp, maxEnemies, keepSurvival);
+            BotLog.danger(bot, "danger_policy_changed",
+                    "mode", policy.mode(),
+                    "retreat_hp", policy.retreatHp(),
+                    "max_enemies", policy.maxEnemies(),
+                    "keep_survival", policy.keepSurvival());
+            String description = DangerPolicyStore.INSTANCE.describe(bot.getUuid());
+            BrainCoordinator.INSTANCE.sendPanelChat(bot, "system",
+                    bot.getGameProfile().getName() + " 的危险应对策略已更新: " + description);
+            return ok("danger_policy_set: " + description);
+        });
+
+        register("get_danger_policy", "Show this bot's effective danger-response policy with the source of each value (policy override vs server config/default).",
+                objectSchema().build(),
+                (bot, args) -> ok(DangerPolicyStore.INSTANCE.describe(bot.getUuid())));
 
         register("post_job", "Post a shared job to the multi-bot task board. Idle bots whose role matches the job role can claim and execute it.", objectSchema()
                 .property("kind", stringSchema("job kind, for example mine, build, craft, smelt, move, eat, or light_area"))
@@ -906,7 +948,7 @@ public final class ToolRegistry {
             case "attack" -> new CombatTask(
                     requiredEntityType(params, "entity_type"),
                     optionalInt(params, "count", 1),
-                    io.github.zoyluo.aibot.AIBotConfig.get().combat().retreatHp());
+                    DangerPolicyStore.INSTANCE.resolve(bot).retreatHp());
             case "mine" -> {
                 Block block = blockWithAlias(params, "block", "block_type");
                 int count = optionalInt(params, "count", 1);

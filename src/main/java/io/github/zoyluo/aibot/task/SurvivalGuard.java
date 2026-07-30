@@ -33,6 +33,11 @@ public final class SurvivalGuard {
                 || task instanceof LavaEscapeTask) {
             return null; // LavaEscapeTask 是入浆自救本身,绝不能被 guard_in_lava 反过来打断
         }
+        // 策略层:LLM 经 set_danger_policy 关掉环境保命(keep_survival=false)→ 熔断全部失效,
+        // 作业不被叫停,代价(可能淹死/烧死)是工具约定语义。NavSafetyNet 的位置矫正自救不受此开关影响。
+        if (!DangerPolicyStore.INSTANCE.resolve(bot).keepSurvival()) {
+            return null;
+        }
         // 注意:RecoverDropsTask 故意**不**豁免——水下跑尸 air 告急时斩掉它是对的:
         // 豁免=任务继续=淹死再掉一身,装备认亏换命是唯一正解(审查时曾被建议豁免,勿改)。
         // ① 溺水:头没入水且氧量只剩 5 秒——作业再要紧也得先有命换气。

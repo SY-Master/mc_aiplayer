@@ -42,7 +42,7 @@ public final class EvadeTask extends AbstractTask {
     @Override
     protected void onTick(AIPlayerEntity bot) {
         if (escapeGoal == null) {
-            // 无处可逃(深处隧道/被围)→ 干净失败,交 DangerWatcher 升级筑墙自保,不假完成空转挨打。
+            // 无处可逃(深处隧道/被围)→ 干净失败,交 DangerWatcher 升级(立即反击/濒死筑墙),不假完成空转挨打。
             fail("no_valid_escape_route");
             return;
         }
@@ -93,7 +93,7 @@ public final class EvadeTask extends AbstractTask {
             }
         }
         // 逃向方向 20+4 格内无可站点(深处隧道四周全实心/被围)→ 返回 null 表"无处可逃",
-        // 由 onTick 干净 fail 交 DangerWatcher 升级筑墙。绝不返回当前位置(旧 bug:距离=0 → 立即假完成 →
+        // 由 onTick 干净 fail 交 DangerWatcher 升级(反击/筑墙)。绝不返回当前位置(旧 bug:距离=0 → 立即假完成 →
         // DangerWatcher 见威胁仍在又派 evade → 原地反复假逃被磨死,real_diamond 深层挖矿送命主因)。
         return null;
     }

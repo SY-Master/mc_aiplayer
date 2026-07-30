@@ -22,7 +22,8 @@ public final class ActionDispatcher {
             java.util.Set.of("move", "mine", "strip_mine");
     private static final int GOAL_FAIL_GUARD_TICKS = 600; // 30s
     private static final java.util.Set<String> USER_PAUSED_ALLOWED_TOOLS = java.util.Set.of(
-            "say", "get_task_status", "goal_status", "recall", "list_jobs", "pause", "resume", "stop", "cancel_all");
+            "say", "get_task_status", "goal_status", "recall", "list_jobs", "pause", "resume", "stop", "cancel_all",
+            "set_danger_policy", "get_danger_policy");
 
     private final ToolRegistry registry;
 

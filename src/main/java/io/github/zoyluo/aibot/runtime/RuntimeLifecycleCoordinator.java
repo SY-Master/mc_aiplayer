@@ -23,6 +23,7 @@ import io.github.zoyluo.aibot.observe.ReplayRecorder;
 import io.github.zoyluo.aibot.observe.TpsGuard;
 import io.github.zoyluo.aibot.pathfinding.AStarPathfinder;
 import io.github.zoyluo.aibot.persist.BotPersistence;
+import io.github.zoyluo.aibot.task.DangerPolicyStore;
 import io.github.zoyluo.aibot.task.DangerWatcher;
 import io.github.zoyluo.aibot.task.EpisodeMemory;
 import io.github.zoyluo.aibot.task.NavSafetyNet;
@@ -44,6 +45,7 @@ public final class RuntimeLifecycleCoordinator {
         BotPersistence.INSTANCE.resumeWrites();
         RuntimeRecipeIndex.rebuild(server);
         KnowledgeBase.INSTANCE.attachServer(server);
+        DangerPolicyStore.INSTANCE.attachServer(server); // 先于 loadAndRespawn:bot 复活首 tick 就能读到落盘策略
         int restored = BotPersistence.INSTANCE.loadAndRespawn(server);
         BotLog.lifecycle("server_runtime_ready", "restored_bots", restored,
                 "runtime_session", TaskBoard.INSTANCE.runtimeSessionId());
@@ -57,6 +59,7 @@ public final class RuntimeLifecycleCoordinator {
         BrainCoordinator.INSTANCE.shutdown();
         clearWorldRuntime();
         KnowledgeBase.INSTANCE.detachServer();
+        DangerPolicyStore.INSTANCE.detachServer(); // 仅清内存:数据改动时已落盘,重启加载回来
         RuntimeRecipeIndex.clear();
         BotLog.lifecycle("server_runtime_stopped", "persisted_bots", persisted);
         BotLogWriter.INSTANCE.shutdown(3000);
@@ -93,6 +96,7 @@ public final class RuntimeLifecycleCoordinator {
         TaskManager.INSTANCE.onBotDespawn(bot);
         GoalExecutor.INSTANCE.unload(bot);
         forgetBot(bot);
+        DangerPolicyStore.INSTANCE.forget(bot.getUuid()); // 删除=连存档策略一起清(区别于 unload 的仅清内存)
     }
 
     /** Server stop is unload, not deletion; the already-captured Mission must not receive CANCELLED. */
@@ -122,6 +126,7 @@ public final class RuntimeLifecycleCoordinator {
         BotMemoryStore.INSTANCE.remove(bot.getUuid());
         EpisodeLog.INSTANCE.clearFor(bot.getUuid());
         KnowledgeBase.INSTANCE.forget(bot.getUuid());
+        DangerPolicyStore.INSTANCE.clear(bot.getUuid()); // 仅内存:unload 与 delete 共用,存档删除只在 deleteBot
         ReplayRecorder.INSTANCE.clear(bot.getUuid());
         BotProfiler.INSTANCE.clear(bot.getUuid());
         AIBotServerNetworking.INSTANCE.clearBot(bot.getUuid());
@@ -139,6 +144,7 @@ public final class RuntimeLifecycleCoordinator {
         EpisodeLog.INSTANCE.clearAll();
         BotMemoryStore.INSTANCE.clear();
         BotRuntimeOptions.INSTANCE.clearAll();
+        DangerPolicyStore.INSTANCE.clearAll();
         BotReporter.INSTANCE.clearAll();
         DiagnosticLogger.INSTANCE.clearAll();
         ReplayRecorder.INSTANCE.clearAll();

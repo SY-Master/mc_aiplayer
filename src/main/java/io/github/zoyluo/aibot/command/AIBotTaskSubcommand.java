@@ -231,7 +231,7 @@ public final class AIBotTaskSubcommand {
         return assign(context, bot -> new CombatTask(
                 Registries.ENTITY_TYPE.get(IdentifierArgumentType.getIdentifier(context, "entity_type")),
                 count,
-                io.github.zoyluo.aibot.AIBotConfig.get().combat().retreatHp()));
+                io.github.zoyluo.aibot.task.DangerPolicyStore.INSTANCE.resolve(bot).retreatHp()));
     }
 
     private static int assignMine(CommandContext<ServerCommandSource> context, int count) {

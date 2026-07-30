@@ -4,6 +4,8 @@ import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.goal.GoalExecutor;
 import io.github.zoyluo.aibot.goal.GoalResult;
 import io.github.zoyluo.aibot.network.AIBotServerNetworking;
+import io.github.zoyluo.aibot.runtime.TaskOrigin;
+import io.github.zoyluo.aibot.task.TaskManager;
 import io.github.zoyluo.aibot.task.TaskState;
 import io.github.zoyluo.aibot.task.TaskStatus;
 import net.minecraft.server.MinecraftServer;
@@ -25,7 +27,7 @@ public final class BotReporter {
     }
 
     public void onAssigned(AIPlayerEntity bot, TaskStatus status) {
-        if (!enabled(bot)) {
+        if (!enabled(bot) || isSafetyReflex(bot)) {
             return;
         }
         ReportState state = new ReportState(status.name(), status.description(), 25);
@@ -34,7 +36,7 @@ public final class BotReporter {
     }
 
     public void onStatus(MinecraftServer server, AIPlayerEntity bot, TaskStatus status) {
-        if (!enabled(bot)) {
+        if (!enabled(bot) || isSafetyReflex(bot)) {
             return;
         }
         if (status.name().equals("idle")) {
@@ -114,6 +116,13 @@ public final class BotReporter {
 
     private static boolean enabled(AIPlayerEntity bot) {
         return BotRuntimeOptions.INSTANCE.verboseReportsEnabled(bot);
+    }
+
+    // 自主生存反射(威胁躲避/战斗、濒死封墙、岩浆逃生、紧急进食、跑尸等,origin=SAFETY)不进消息栏:
+    // 怪在感知圈边缘反复进出时,几秒一轮"开始躲避危险/步骤完成:躲避危险"刷屏(用户实测反馈)。
+    // 诊断由 BotLog.danger 兜底;死亡跑尸、被困求助等关键事件 DangerWatcher 另有专门面板消息。
+    private static boolean isSafetyReflex(AIPlayerEntity bot) {
+        return TaskManager.INSTANCE.activeOrigin(bot).map(TaskOrigin::safety).orElse(false);
     }
 
     private static String progressText(TaskStatus status, int milestone) {

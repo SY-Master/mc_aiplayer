@@ -113,10 +113,13 @@ public final class DangerWatcher {
         }
         Optional<Threat> threat = collectTopThreat(bot);
         Optional<Task> active = TaskManager.INSTANCE.getActive(bot);
+        // 策略层:LLM 经 set_danger_policy 设置的 per-bot 危险应对策略(未设字段回落 AIBotConfig 默认)。
+        DangerPolicyStore.Effective policy = DangerPolicyStore.INSTANCE.resolve(bot);
         // 入浆即自救(最高优先,压倒威胁):岩浆每 tick 烧 4,几秒就死。SurvivalGuard 只中断作业、注释说
         // "让位 DangerWatcher 脱困"但从未实现——bot 泡在岩浆里被烧死(real_diamond 下潜挖穿岩浆袋,14/15 步功亏一篑)。
         // 这里补上:身陷岩浆且当前不是逃浆任务 → 立即派 LavaEscapeTask,把命先捞回来。
-        if (bot.isInLava() && !(active.isPresent() && active.get() instanceof LavaEscapeTask)) {
+        // keep_survival=false 时本闸失效(LLM 约定自担风险);NavSafetyNet 的逐 tick movement 兜底仍生效。
+        if (policy.keepSurvival() && bot.isInLava() && !(active.isPresent() && active.get() instanceof LavaEscapeTask)) {
             if (active.isPresent()) {
                 TaskManager.INSTANCE.pauseFor(bot, "lava_escape");
             }
@@ -142,6 +145,7 @@ public final class DangerWatcher {
                 && hasReachableHostile(bot);
         if ((topIsHostile || lowHpUnderHostile)
                 && entombNow
+                && policy.keepSurvival() // keep_survival=false:LLM 关环境保命,封墙闸同样失效
                 && EmergencyShelterTask.hasShelterBlock(bot)
                 && !(active.isPresent() && active.get() instanceof EmergencyShelterTask)) {
             if (active.isPresent()) {
@@ -152,13 +156,30 @@ public final class DangerWatcher {
                     "underground", cannotFlee, "threat", threat.get().type());
             return true;
         }
-        if (threat.isPresent()) {
+        // mode=OFF:LLM 明确关闭自主怪物应对 → 威胁派发整段跳过(含 trappedBackoff/冷却记账),
+        // 当前作业(采集/挖矿…)不被打断。死亡复活、黑暗撤离不属此闸,不受 OFF 影响。
+        if (threat.isPresent() && policy.mode() != DangerPolicy.Mode.OFF) {
             Threat top = threat.get();
+            // 逃跑失败即反击:evade 刚失败(无处可逃/超时)且威胁还在 → 立即反打,不等威胁冷却、不看 canFight 闸。
+            // 旧逻辑失败后进 80t 冷却干挨打,没武器时永远进不了战斗,"卡在那不动"被活活磨死。绝境没得算,空手也打。
+            // 濒死(≤4心)有方块由上面的封墙闸兜(它无视冷却);FLEE 是明确不战姿态,不升级,走常规再逃/退避求助。
+            if (top.type() == Threat.Type.HOSTILE && top.entity() != null
+                    && policy.mode() != DangerPolicy.Mode.FLEE
+                    && evadeJustFailed(bot)) {
+                TaskManager.INSTANCE.consumeFailure(bot);
+                if (active.isPresent()) {
+                    TaskManager.INSTANCE.pauseFor(bot, "evade_failed_fight_back");
+                }
+                TaskManager.INSTANCE.assign(bot, new CombatTask(top.entity().getType(), 1, 0.0F),
+                        TaskOrigin.safety("evade_failed_fight_back"));
+                BotLog.danger(bot, "evade_failed_fight_back", "target", top.entity().getType().toString());
+                return true;
+            }
             if (top.severity().ordinal() >= Threat.Severity.MEDIUM.ordinal()
                     && shouldAssignThreatTask(active, top)
                     && canAssignThreatTask(server, bot, top)) {
-                Task task = decideCombatOrEvade(bot, top);
-                if (trappedBackoff(server, bot, task)) {
+                Task task = decideCombatOrEvade(bot, top, policy);
+                if (trappedBackoff(server, bot, task, policy)) {
                     return true; // 被困:退避并(节流)求助,不再每 2 秒空派 shelter/evade
                 }
                 if (active.isPresent() && shouldPauseForThreat(active.get(), top, task)) {
@@ -332,11 +353,18 @@ public final class DangerWatcher {
         return true;
     }
 
-    private Task decideCombatOrEvade(AIPlayerEntity bot, Threat threat) {
-        AIBotConfig.Combat combat = AIBotConfig.get().combat();
-        // combat 困死:连续多次 combat 被 stuck 中止(目标够不到——如僵尸在下方矿洞/墙后)→ 别再站桩等死,改逃跑。
-        if (canFight(bot, threat, combat) && !combatStuck(bot)) {
-            return new CombatTask(threat.entity().getType(), 1, combat.retreatHp());
+    private Task decideCombatOrEvade(AIPlayerEntity bot, Threat threat, DangerPolicyStore.Effective policy) {
+        // 策略层(LLM set_danger_policy):
+        //  FIGHT=主战——canFightForced 去掉 maxEnemies 数量闸(LLM 明确要打群架也奉陪),武器/血量/苦力怕闸保留;
+        //  FLEE=永不接战;AUTO=原启发式(数量上限按策略值)。OFF 到不了这里(威胁闸已拦)。
+        // combat 困死(连续 stuck 中止=目标够不到)任何模式都改逃,别撞墙等死。
+        boolean fight = switch (policy.mode()) {
+            case FIGHT -> canFightForced(bot, threat, policy) && !combatStuck(bot);
+            case FLEE, OFF -> false;
+            default -> canFight(bot, threat, policy) && !combatStuck(bot);
+        };
+        if (fight) {
+            return new CombatTask(threat.entity().getType(), 1, policy.retreatHp());
         }
         if (!bot.getServerWorld().isDay()
                 && threat.type() == Threat.Type.HOSTILE
@@ -350,7 +378,7 @@ public final class DangerWatcher {
     // 第1层:困死退避 + 求助。仅针对逃避类(evade/shelter);战斗(canFight→CombatTask)不拦。
     // bot 反复在同一格触发逃避却没移动(被围/困坑底)→ 累加;达阈值即退避(长 cooldown 静默等救援)
     // 并节流向玩家求助,而非每 2 秒空派一次 shelter/evade 刷屏。bot 真在逃(位置变)则计数自然重置。
-    private boolean trappedBackoff(MinecraftServer server, AIPlayerEntity bot, Task next) {
+    private boolean trappedBackoff(MinecraftServer server, AIPlayerEntity bot, Task next, DangerPolicyStore.Effective policy) {
         if (!(next instanceof EvadeTask) && !(next instanceof EmergencyShelterTask)) {
             trapRecords.remove(bot.getUuid());
             return false;
@@ -366,7 +394,9 @@ public final class DangerWatcher {
         // 绝境反击:困住(逃跑反复原地)且正在挨打——退避=站着等死(real_iron 实测:洞穴 13 蛛贴脸,
         // evade 目标算出原地 1t 完成,backoff 停发威胁任务后被围殴致死)。canFight 的武器/数量闸
         // 是"打得划算吗"的算计,绝境没得算:空手也开打,伤害换活命窗口。
-        if (repeat >= 2 && bot.hurtTime > 0) {
+        // FLEE/OFF 是 LLM 的明确姿态,绝境也不越权反击——只走退避+节流求助(复活兜底永远在)。
+        if (repeat >= 2 && bot.hurtTime > 0
+                && policy.mode() != DangerPolicy.Mode.FLEE && policy.mode() != DangerPolicy.Mode.OFF) {
             trapRecords.remove(bot.getUuid());
             var hostile = bot.getServerWorld().getEntitiesByClass(
                     net.minecraft.entity.mob.HostileEntity.class,
@@ -546,6 +576,12 @@ public final class DangerWatcher {
         return false;
     }
 
+    // 最近一次失败是不是 evade(无处可逃/逃跑超时)——pendingFailure 在任务完成/reset 时清,升级反击时消费,只触发一轮。
+    private static boolean evadeJustFailed(AIPlayerEntity bot) {
+        Optional<TaskManager.FailureRecord> fail = TaskManager.INSTANCE.peekFailure(bot);
+        return fail.isPresent() && "evade".equals(fail.get().name());
+    }
+
     // combat 困死检测:连续 ≥2 次 combat 被 StuckWatcher 中止(stuck:combat),说明目标够不到 → 改逃,别站桩被打死。
     private boolean combatStuck(AIPlayerEntity bot) {
         Optional<TaskManager.FailureRecord> fail = TaskManager.INSTANCE.peekFailure(bot);
@@ -555,11 +591,11 @@ public final class DangerWatcher {
                 && fail.get().count() >= 2;
     }
 
-    private boolean canFight(AIPlayerEntity bot, Threat threat, AIBotConfig.Combat combat) {
+    private boolean canFight(AIPlayerEntity bot, Threat threat, DangerPolicyStore.Effective policy) {
         if (threat.type() != Threat.Type.HOSTILE || threat.entity() == null || !threat.entity().isAlive()) {
             return false;
         }
-        if (bot.getHealth() <= combat.retreatHp()) {
+        if (bot.getHealth() <= policy.retreatHp()) {
             return false;
         }
         if (threat.entity() instanceof CreeperEntity) {
@@ -571,7 +607,22 @@ public final class DangerWatcher {
                 .stream()
                 .filter(entity -> io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveEntity(bot, entity))
                 .toList().size();
-        return hostiles <= combat.maxEnemiesToFight() && EquipAction.bestWeaponSlot(bot).isPresent();
+        return hostiles <= policy.maxEnemies() && EquipAction.bestWeaponSlot(bot).isPresent();
+    }
+
+    // FIGHT 模式(LLM 主战):忽略 maxEnemies 数量闸,其余保留——血量≤撤退线不接战(撤退线是同策略可调参数),
+    // 苦力怕近战必死始终免战,无武器打不动改走 fallback 逃/封墙(工具描述已告知 FIGHT 不保证接战)。
+    private boolean canFightForced(AIPlayerEntity bot, Threat threat, DangerPolicyStore.Effective policy) {
+        if (threat.type() != Threat.Type.HOSTILE || threat.entity() == null || !threat.entity().isAlive()) {
+            return false;
+        }
+        if (bot.getHealth() <= policy.retreatHp()) {
+            return false;
+        }
+        if (threat.entity() instanceof CreeperEntity) {
+            return false;
+        }
+        return EquipAction.bestWeaponSlot(bot).isPresent();
     }
 
     private static boolean shouldAssignThreatTask(Optional<Task> active, Threat threat) {
