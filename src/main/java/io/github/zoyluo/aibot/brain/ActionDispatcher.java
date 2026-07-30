@@ -128,7 +128,7 @@ public final class ActionDispatcher {
                 BotLog.warn(io.github.zoyluo.aibot.log.LogCategory.COMM, bot, "manual_mining_blocked", "tool", call.name());
                 return new ToolDefinition.ToolResult(false,
                         "blocked: 目标刚失败,别手动逐格挖/盲目移动(易耗尽轮次或把自己挖进水/岩浆/怪堆)。"
-                                + "请用高层目标重试(mine_ore 自动换层换位找矿 / gather 自动找资源),或 say 一句说明后停下待命。");
+                                + "请用高层目标重试(mine_ore 自动换层换位找矿 / gather 自动找资源), 或说明后停下待命。");
             }
             ToolDefinition definition = registry.get(call.name())
                     .orElseThrow(() -> new IllegalArgumentException("unknown_tool: " + call.name()));

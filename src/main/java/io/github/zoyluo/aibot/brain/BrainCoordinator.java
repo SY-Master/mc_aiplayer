@@ -84,7 +84,7 @@ public final class BrainCoordinator {
                 3. Prefer high-level deterministic tasks for survival work. For ores or raw ore materials, use mine_ore; it automatically prepares the required pickaxe before mining. For an item/tool goal such as iron_pickaxe or iron_ingot, use achieve_goal. Do not manually decompose these into gather/craft/mine steps unless the goal tool fails.
                 4. Low-level tools such as move_to, mine_block, select_hotbar, and place_block are for one-off manual actions only. Do not use them for gathering materials or placing a crafting table for recipes unless the human explicitly asks for manual control.
                 5. High-level tasks such as craft, smelt, eat, or assign_task run over multiple ticks. Start only one such task at a time, then use get_task_status or the Current state task field on later turns until it is COMPLETED or FAILED before assigning the next task. EXCEPTION: goal tools (achieve_goal, mine_ore, harvest_crop, provision_food, set_goal) support QUEUEING — if a goal is already running, a new goal call is queued and starts automatically when the current one finishes (the system announces each transition). So for a compound request like "先搞点吃的,然后挖些铁" call provision_food then mine_ore back-to-back in the same turn, then STOP. While a goal is running, ADDING work ("顺便/然后/再做X") = just call the goal tool (it queues); REPLACING ("别挖了/先停下,改做X") = call stop first, then the new goal tool; CANCELLING EVERYTHING including queued goals = call cancel_all; a pure question ("干得怎么样") = goal_status or say only — never call stop for questions or additions.
-                6. Always reply to humans in Simplified Chinese. Use the say tool to reply to humans. Keep replies short (one sentence).
+                6. Always reply to humans in Simplified Chinese. Keep replies short (one sentence).
                 7. For survival crafting, call plan_craft first when materials may be missing. Use missing[].source to choose assign_task mine, smelt, craft, or forage before retrying craft for the intended target. CraftTask expands recipe-table intermediates such as planks and sticks, so do not craft planks or sticks as standalone steps unless the human asks for those items.
                 8. For 3x3 recipes, do not manually select or place a crafting table. If a crafting table is nearby or in inventory, the craft task can use or place it.
                 9. For "挖铁矿", call mine_ore with ore=minecraft:iron_ore. For "做一把铁镐" or "给我铁锭", call achieve_goal with item=minecraft:iron_pickaxe or minecraft:iron_ingot. The deterministic goal executor will plan gathering, crafting, mining, and smelting. CRITICAL: a single mine_ore/achieve_goal call runs the ENTIRE multi-step plan autonomously (gather wood, craft tools, mine stone, mine ore). After you call it, STOP immediately — do NOT call any other tool (no say, no inventory, no assign_task, no mine, no strip_mine) and do NOT narrate intermediate steps. The system executes every step itself and will notify you only when the whole goal is finished or has truly failed. Calling other tools meanwhile will abort the goal and break it. For "种小麦/收点小麦/给我小麦" (or carrot/potato), call harvest_crop with crop=wheat/carrot/potato — it auto-prepares a hoe, tills, plants, waits, and harvests; same rule: call once then STOP. For "盖房子/建个房/造个家", call build_house (blueprint optional) — it auto-gathers all materials then builds; same rule: call once then STOP.
@@ -191,36 +191,17 @@ public final class BrainCoordinator {
                 }).toList();
             }).thenAcceptAsync(messages -> {
                 // 回到服务器线程：写入历史、继续 LLM 对话
-                if (!conversation.decision.isApplying(lease)) {
-                    logStaleDecision(lease, "tool_result_stale");
-                    return;
-                }
-                conversation.history.addAll(messages);
-
-                // 这些都是假同步有用的代码，现在改成真同步，这些内容先注释掉
-                // conversation.turnsInCurrentRequest++;
-                // maybeInjectMaxTurnsHint(conversation);
-                // if (conversation.turnsInCurrentRequest >= AIBotConfig.get().brain().maxTurnsPerRequest()) {
-                //     BotLog.warn(LogCategory.COMM, bot, "max_turns_reached", "turns", conversation.turnsInCurrentRequest);
-                //     if (!conversation.decision.complete(lease)) {
-                //         logStaleDecision(lease, "max_turns_completion");
-                //         return;
-                //     }
-                //     sendPanelChat(bot, "system", "工具调用轮次已达上限，已停止思考。");
-                //     trimHistory(conversation);
+                // if (!conversation.decision.isApplying(lease)) {
+                //     logStaleDecision(lease, "tool_result_stale");
                 //     return;
                 // }
-
-                // 注入当前世界状态作为上下文（不再伪装成 user 消息，改用 system 消息提供感知快照）
-                // PerceptionSnapshot snapshot = PerceptionCollector.collect(bot);
-                // conversation.lastPerceptionDigest = perceptionDigest(snapshot);
-                // conversation.history.add(ChatMessage.system("Current world state (after tool execution):\n" + snapshot.toJson()));
+                conversation.history.addAll(messages);
 
                 trimHistory(conversation);
-                if (!conversation.decision.awaitContinuation(lease)) {
-                    logStaleDecision(lease, "continuation_wait");
-                    return;
-                }
+                // if (!conversation.decision.awaitContinuation(lease)) {
+                //     logStaleDecision(lease, "continuation_wait");
+                //     return;
+                // }
                 submit(bot, conversation, lease);
             }, server::execute);
             return;
@@ -468,19 +449,19 @@ public final class BrainCoordinator {
         if (conversation.maxTurnsHintInjected || conversation.turnsInCurrentRequest < maxTurns - 2) {
             return;
         }
-        conversation.history.add(ChatMessage.system("你已多次调用工具仍未完成。请改用高层工具一次完成(如 mine_ore / achieve_goal / craft)、或用 say 说明原因。"));
+        conversation.history.add(ChatMessage.system("你已多次调用工具仍未完成。请改用高层工具一次完成(如 mine_ore / achieve_goal / craft)、或说明原因。"));
         conversation.maxTurnsHintInjected = true;
     }
 
     private boolean maybeInjectFailure(AIPlayerEntity bot, BotConversation conversation) {
         return TaskManager.INSTANCE.consumeFailure(bot).map(failure -> {
             int maxRetries = AIBotConfig.get().brain().maxTaskRetries();
-            String retryHint = failure.count() >= maxRetries ? " 已经连续多次同样失败,请倾向于换方法或用 say 说明无法完成。" : "";
+            String retryHint = failure.count() >= maxRetries ? " 已经连续多次同样失败,请倾向于换方法或说明无法完成。" : "";
             String strategyHint = failure.count() >= 2 ? " 同一任务和原因已经连续失败,禁止原样重试;必须换工具/任务策略,或先补齐前置条件。" : "";
             String executableHint = executableFailureHint(failure);
             PerceptionSnapshot snapshot = PerceptionCollector.collect(bot);
             conversation.lastPerceptionDigest = perceptionDigest(snapshot);
-            conversation.history.add(ChatMessage.system("上一个任务失败:" + failure.name() + ",原因:" + failure.reason() + "(第" + failure.count() + "次)。请判断:补齐前置条件后重试 / 换用其它方法 / 用 say 说明无法完成。" + retryHint + strategyHint + executableHint + "\n\nCurrent state:\n" + snapshot.toJson()));
+            conversation.history.add(ChatMessage.system("上一个任务失败:" + failure.name() + ",原因:" + failure.reason() + "(第" + failure.count() + "次)。请判断:补齐前置条件后重试 / 换用其它方法 / 说明无法完成。" + retryHint + strategyHint + executableHint + "\n\nCurrent state:\n" + snapshot.toJson()));
             BotLog.comm(bot, "failure_injected", "name", failure.name(), "reason", failure.reason(), "count", failure.count(), "tick", failure.tick());
             return true;
         }).orElse(false);

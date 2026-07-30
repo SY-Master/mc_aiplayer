@@ -91,15 +91,6 @@ public final class ToolRegistry {
     }
 
     private void registerDefaults() {
-        register("say", "Reply to the human in Simplified Chinese. The reply is shown in the AIBot panel.", objectSchema()
-                .property("message", stringSchema("the text to say"))
-                .required("message")
-                .build(), (bot, args) -> {
-            String message = requiredString(args, "message");
-            BrainCoordinator.INSTANCE.sendPanelChat(bot, "bot", message);
-            return ok("said");
-        });
-
         register("look_at", "Turn the bot's head toward a coordinate", xyzSchema(), ToolDefinition.Group.LOW_LEVEL, (bot, args) -> {
             LookAction.lookAt(bot, new Vec3d(requiredInt(args, "x"), requiredInt(args, "y"), requiredInt(args, "z")));
             return ok("looked");
