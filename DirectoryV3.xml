@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- 这是一个给指定文件设置标题的文件，在Idea里面搜索插件“TreeInfotip”可以支持这个文件 -->
  <trees>
      <!-- ==================== 根 ==================== -->
      <tree path="/src/main/java/io/github/zoyluo/aibot" title="AI机器人根目录"/>
