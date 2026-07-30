@@ -24,6 +24,11 @@ public final class AsyncDecisionExecutor {
                        BiConsumer<DecisionLease, Throwable> onError) {
         var server = bot.getServer();
         var botId = bot.getUuid();
+
+        if (server == null) {
+            throw new RuntimeException("server is null");
+        }
+
         String botName = bot.getGameProfile().getName();
         executor.submit(() -> {
             long started = System.nanoTime();

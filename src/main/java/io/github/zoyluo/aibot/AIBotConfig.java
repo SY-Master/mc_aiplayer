@@ -132,7 +132,10 @@ public record AIBotConfig(
                 OperatorCapabilities.defaults(),
                 new DeepSeek("", "https://api.deepseek.com", "deepseek-chat", 2048, 0.3D, 60, 3, 500),
                 new Perception(16, 20, 10, 10, false),
-                new Brain(36, 6, 12, false, true, false, 3, true, 120),
+                // toolTimeoutSeconds=1800:真同步模式下 goal 类工具(achieve_armor/achieve_goal/build_house 等)
+                // 阻塞到目标完成,从零采集+熔炼+合成合法耗时很长(gametest real_armor 预算 36000 ticks=1800s),
+                // 旧值 120s 会让长目标中途超时、大脑收到 timeout 被打断。
+                new Brain(36, 6, 12, false, true, false, 3, true, 1800),
                 new Watchdog(200),
                 new Logging(true, "logs/aibot", true, "daily", 50, 30, true, Map.of(
                         "LIFECYCLE", "INFO",

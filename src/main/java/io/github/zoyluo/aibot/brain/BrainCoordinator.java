@@ -125,9 +125,11 @@ public final class BrainCoordinator {
             BotLog.comm(bot, "decision_superseded", "epoch", lease.epoch(), "request_sequence", lease.requestSequence());
         }
 
+        // 初始化系统提示词
         if (conversation.history.isEmpty()) {
             conversation.history.add(ChatMessage.system(systemPrompt(bot.getGameProfile().getName())));
         }
+
         PerceptionSnapshot snapshot = PerceptionCollector.collect(bot);
         conversation.lastPerceptionDigest = perceptionDigest(snapshot);
         conversation.history.add(ChatMessage.user("[" + senderName + "] says: " + text + "\n\nCurrent state:\n" + snapshot.toJson()));
@@ -160,10 +162,11 @@ public final class BrainCoordinator {
             // 真同步工具调用：在服务器线程启动所有任务（收集 futures），
             // 然后释放服务器线程，在工作线程上阻塞等待任务完成。
             var guard = new Object() {
-                boolean valid = true;
+                final boolean valid = true;
             };
             BooleanSupplier leaseGuard = () -> conversation.decision.isApplying(lease) && guard.valid;
-            ActionDispatcher.AsyncDispatchBatch batch = dispatcher.dispatchBatchAsync(bot, response.toolCalls(), leaseGuard);
+            List<ChatToolCall> calls = response.toolCalls();
+            ActionDispatcher.AsyncDispatchBatch batch = dispatcher.dispatchBatchAsync(bot, calls, leaseGuard);
 
             if (!conversation.decision.isApplying(lease)) {
                 logStaleDecision(lease, "tool_batch");
@@ -172,7 +175,7 @@ public final class BrainCoordinator {
                 return;
             }
 
-            ReplayRecorder.INSTANCE.onDecision(bot, conversation.lastPerceptionDigest, response.toolCalls(), "");
+            ReplayRecorder.INSTANCE.onDecision(bot, conversation.lastPerceptionDigest, calls, "");
 
             // 释放服务器线程：在工作线程上等待所有工具完成
             int toolTimeout = AIBotConfig.get().brain().toolTimeoutSeconds();
@@ -180,15 +183,28 @@ public final class BrainCoordinator {
             var botId = bot.getUuid();
 
             CompletableFuture.allOf(batch.futures().toArray(CompletableFuture[]::new)).orTimeout(toolTimeout, TimeUnit.SECONDS).handle((v, timeoutEx) -> {
-                // 收集结果（在工作线程上）
-                return batch.futures().stream().map(f -> {
+                // 收集结果（在工作线程上）。future 与 calls 顺序一一对应（dispatchBatchAsync 按 calls 顺序生成，
+                // lease 失效的提前 break 会在上面走 stale 分支直接 return），超时/异常兜底必须带回真实 tool_call_id，
+                // 否则 tool_call_id="error" 与前面 assistant tool_calls 不匹配，下一轮 API 请求会被拒绝。
+                List<CompletableFuture<ChatMessage>> futures = batch.futures();
+                List<ChatMessage> results = new ArrayList<>(futures.size());
+                for (int index = 0; index < futures.size(); index++) {
+                    CompletableFuture<ChatMessage> future = futures.get(index);
+                    String callId = index < calls.size() ? calls.get(index).id() : "unknown";
                     try {
-                        ChatMessage msg = f.getNow(null);
-                        return msg != null ? msg : ChatMessage.toolResult("error", new ToolDefinition.ToolResult(false, timeoutEx != null ? "timeout:" + toolTimeout + "s" : "internal_error").toToolContent());
+                        ChatMessage message = future.getNow(null);
+                        if (message != null) {
+                            results.add(message);
+                            continue;
+                        }
+                        future.cancel(false);
+                        String reason = timeoutEx != null ? "timeout:" + toolTimeout + "s" : "internal_error";
+                        results.add(ChatMessage.toolResult(callId, new ToolDefinition.ToolResult(false, reason).toToolContent()));
                     } catch (Exception e) {
-                        return ChatMessage.toolResult("error", new ToolDefinition.ToolResult(false, "error:" + e.getMessage()).toToolContent());
+                        results.add(ChatMessage.toolResult(callId, new ToolDefinition.ToolResult(false, "error:" + e.getMessage()).toToolContent()));
                     }
-                }).toList();
+                }
+                return results;
             }).thenAcceptAsync(messages -> {
                 // 回到服务器线程：写入历史、继续 LLM 对话
                 // if (!conversation.decision.isApplying(lease)) {
@@ -198,10 +214,12 @@ public final class BrainCoordinator {
                 conversation.history.addAll(messages);
 
                 trimHistory(conversation);
+
                 // if (!conversation.decision.awaitContinuation(lease)) {
                 //     logStaleDecision(lease, "continuation_wait");
                 //     return;
                 // }
+
                 submit(bot, conversation, lease);
             }, server::execute);
             return;
