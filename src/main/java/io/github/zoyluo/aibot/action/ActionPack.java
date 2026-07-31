@@ -53,7 +53,7 @@ public final class ActionPack {
 
     /** 把移动输入夹到 [-1, 1]（Minecraft 移动输入的有效范围）。 */
     private static float clampInput(float value) {
-        return Math.max(-1.0F, Math.min(1.0F, value));
+        return Math.clamp(value, -1.0F, 1.0F);
     }
 
     /**

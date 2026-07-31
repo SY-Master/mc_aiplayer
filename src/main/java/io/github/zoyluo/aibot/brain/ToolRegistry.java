@@ -194,10 +194,7 @@ public final class ToolRegistry {
                 CompletableFuture<TaskStatus> taskFuture = TaskManager.INSTANCE.whenComplete(bot);
                 Task task = new CraftTask(requiredItem(args, "item"), optionalInt(args, "count", 1));
                 assignLlm(bot, task);
-                taskFuture.thenAccept(status ->
-                    future.complete(status.state() == TaskState.COMPLETED
-                        ? ok(status.description())
-                        : fail(status.failureReason() != null ? status.failureReason() : "failed")));
+                taskFuture.thenAccept(status -> future.complete(fromTaskStatus(status)));
                 return future;
             });
 
@@ -293,10 +290,7 @@ public final class ToolRegistry {
                     Task task = new OreDigTask(oreTargetsFrom(requiredString(args, "ore")), optionalInt(args, "count", 1));
                     CompletableFuture<TaskStatus> taskFuture = TaskManager.INSTANCE.whenComplete(bot);
                     assignLlm(bot, task);
-                    taskFuture.thenAccept(status ->
-                        future.complete(status.state() == TaskState.COMPLETED
-                            ? ok(status.description())
-                            : fail(status.failureReason() != null ? status.failureReason() : "failed")));
+                    taskFuture.thenAccept(status -> future.complete(fromTaskStatus(status)));
                     return future;
                 }
                 boolean started = GoalExecutor.INSTANCE.submit(bot,
@@ -611,71 +605,40 @@ public final class ToolRegistry {
                 return CompletableFuture.completedFuture(r.isSuccess() ? ok("attacked") : fail(r.reason()));
             }, ToolDefinition.Group.LOW_LEVEL);
 
-        register("stop", "Cancel the current mission/task but preserve explicitly queued missions. Use immediately before a replacement goal.", objectSchema().build(), (bot, args) -> {
-            IntentControlTransaction.Outcome outcome = IntentController.INSTANCE.cancelCurrent(
-                    bot, IntentController.ControlOrigin.LLM_TOOL, "tool_stop");
-            return ok(outcome.changed() ? "cancelled_current" : "already_idle");
-        });
-
-        register("pause", "Pause the current mission without deleting it or its queue; safety actions may still run.",
-                objectSchema().build(), (bot, args) -> {
-            boolean changed = IntentController.INSTANCE.pause(
-                    bot, IntentController.ControlOrigin.LLM_TOOL, "tool_pause");
-            return ok(changed ? "mission_paused" : "already_paused");
-        });
-
-        register("resume", "Resume a mission previously paused by the user.", objectSchema().build(), (bot, args) -> {
-            boolean changed = IntentController.INSTANCE.resume(
-                    bot, IntentController.ControlOrigin.LLM_TOOL, "tool_resume");
-            return ok(changed ? "mission_resumed" : "not_paused");
-        });
-
-        register("cancel_all", "Cancel the current mission and every queued mission", objectSchema().build(), (bot, args) -> {
-            IntentControlTransaction.Outcome outcome = IntentController.INSTANCE.cancelAll(
-                    bot, IntentController.ControlOrigin.LLM_TOOL, "tool_cancel_all");
-            return ok(outcome.changed() ? "cancelled_all" : "already_idle");
-        });
-
-        register("set_danger_policy", "Configure this bot's autonomous danger-response policy (persisted to the world save; takes effect immediately). "
-                + "mode: auto = default heuristic (fight when winnable, otherwise evade or shelter at night); "
-                + "fight = engage whenever armed, the target is not a creeper, and hp is above retreat_hp (ignores the max_enemies cap; falls back to evade/shelter if those fail); "
-                + "flee = never fight, only evade or shelter; off = disable all autonomous responses to monsters so the current task keeps running. "
+        register("behavior_control", "Control this bot's behavior decisions. action (required): "
+                + "stop = cancel the current mission but keep explicitly queued missions (use immediately before a replacement goal); "
+                + "pause = pause the current mission without deleting it or its queue (safety actions may still run); "
+                + "resume = resume a mission paused via pause, or continue work that was interrupted by danger or death"
+                + " (interrupted work keeps its progress; danger-interrupted work also auto-resumes once the danger passes); "
+                + "cancel_all = cancel the current mission and every queued mission; "
+                + "set_policy = configure the autonomous danger-response policy (persisted to the world save; takes effect immediately); "
+                + "get_policy = show the effective danger-response policy with the source of each value (policy override vs server config/default). "
+                + "set_policy fields: mode = auto (default heuristic: fight when winnable, otherwise evade or shelter at night), "
+                + "fight (engage whenever armed, the target is not a creeper, and hp is above retreat_hp; ignores the max_enemies cap; falls back to evade/shelter), "
+                + "flee (never fight, only evade or shelter), off (disable all autonomous responses to monsters so the current task keeps running). "
                 + "retreat_hp (1-20): hp at or below which combat is refused or retreated from. "
                 + "max_enemies (0-20): max nearby hostiles the bot will engage in auto mode; 0 means never fight. "
-                + "keep_survival (default true): set false to disable survival tripwires (drowning/on-fire/low-hp task aborts), the lava-escape task and emergency shelter — "
+                + "keep_survival (default true): false disables survival tripwires (drowning/on-fire/low-hp task aborts), the lava-escape task and emergency shelter — "
                 + "the basic stuck-in-lava/drowning movement rescue and death respawn always stay on, but the bot may take damage or die. "
-                + "Omitted fields keep their current values; sending mode=auto with everything omitted resets to server defaults.", objectSchema()
+                + "mob_reactions: object mapping entity ids to the reaction when that monster is encountered, "
+                + "e.g. {\"minecraft:creeper\": \"flee\", \"minecraft:zombie\": \"fight\", \"minecraft:enderman\": \"ignore\"}. "
+                + "Reaction values: fight = engage this monster whenever armed and hp is above retreat_hp "
+                + "(overrides mode, ignores the max_enemies cap and the creeper melee refusal — you asked for it); "
+                + "flee = never fight this monster, only evade or shelter; "
+                + "ignore = never autonomously react to this monster at all, the current task keeps running; "
+                + "auto = remove the rule for this monster (falls back to mode). "
+                + "reset_mob_reactions = true clears all per-monster rules. "
+                + "Per-monster rules override mode for that monster, including mode=off. "
+                + "Omitted fields keep their current values; action=set_policy with only mode=auto resets the base policy to server defaults.", objectSchema()
+                .property("action", stringSchema("stop, pause, resume, cancel_all, set_policy, or get_policy"))
                 .property("mode", stringSchema("auto, fight, flee, or off"))
                 .property("retreat_hp", integerSchema("refuse or retreat from combat at or below this hp", 1, 20))
                 .property("max_enemies", integerSchema("max hostiles to engage in auto mode; 0 never fights", 0, 20))
                 .property("keep_survival", booleanSchema("keep survival tripwires, lava-escape task and emergency shelter"))
-                .build(), (bot, args) -> {
-            String rawMode = optionalString(args, "mode", "");
-            DangerPolicy.Mode mode = rawMode.isEmpty() ? null : DangerPolicy.parseMode(rawMode);
-            Integer retreatHp = args.has("retreat_hp") && args.get("retreat_hp").isJsonPrimitive()
-                    ? DangerPolicy.validateRetreatHp(args.get("retreat_hp").getAsInt()) : null;
-            Integer maxEnemies = args.has("max_enemies") && args.get("max_enemies").isJsonPrimitive()
-                    ? DangerPolicy.validateMaxEnemies(args.get("max_enemies").getAsInt()) : null;
-            Boolean keepSurvival = args.has("keep_survival") && args.get("keep_survival").isJsonPrimitive()
-                    ? args.get("keep_survival").getAsBoolean() : null;
-            // mode=auto 且其余全省略 = 显式重置回默认(删条目+存档键);否则增量合并
-            DangerPolicy policy = (mode == DangerPolicy.Mode.AUTO && retreatHp == null && maxEnemies == null && keepSurvival == null)
-                    ? DangerPolicyStore.INSTANCE.reset(bot.getUuid())
-                    : DangerPolicyStore.INSTANCE.update(bot.getUuid(), mode, retreatHp, maxEnemies, keepSurvival);
-            BotLog.danger(bot, "danger_policy_changed",
-                    "mode", policy.mode(),
-                    "retreat_hp", policy.retreatHp(),
-                    "max_enemies", policy.maxEnemies(),
-                    "keep_survival", policy.keepSurvival());
-            String description = DangerPolicyStore.INSTANCE.describe(bot.getUuid());
-            BrainCoordinator.INSTANCE.sendPanelChat(bot, "system",
-                    bot.getGameProfile().getName() + " 的危险应对策略已更新: " + description);
-            return ok("danger_policy_set: " + description);
-        });
-
-        register("get_danger_policy", "Show this bot's effective danger-response policy with the source of each value (policy override vs server config/default).",
-                objectSchema().build(),
-                (bot, args) -> ok(DangerPolicyStore.INSTANCE.describe(bot.getUuid())));
+                .property("mob_reactions", mobReactionsSchema())
+                .property("reset_mob_reactions", booleanSchema("clear all per-monster reaction rules"))
+                .required("action")
+                .build(), ToolRegistry::behaviorControl);
 
         register("post_job", "Post a shared job to the multi-bot task board. Idle bots whose role matches the job role can claim and execute it.", objectSchema()
                 .property("kind", stringSchema("job kind, for example mine, build, craft, smelt, move, eat, or light_area"))
@@ -1009,11 +972,6 @@ public final class ToolRegistry {
                     + ",\"description\":\"" + escape(status.description()) + "\"}");
         });
 
-        register("abort_task", "Legacy alias for cancelling the current mission/task while preserving queued missions", objectSchema().build(), (bot, args) -> {
-            IntentControlTransaction.Outcome outcome = IntentController.INSTANCE.cancelCurrent(
-                    bot, IntentController.ControlOrigin.LLM_TOOL, "tool_abort_task");
-            return ok(outcome.changed() ? "cancelled_current" : "already_idle");
-        });
     }
 
     private static Task createTask(io.github.zoyluo.aibot.entity.AIPlayerEntity bot, String taskType, JsonObject params) {
@@ -1171,6 +1129,140 @@ public final class ToolRegistry {
         return ToolDefinition.ToolResult.success(message);
     }
 
+    // behavior_control 统一入口:任务控制(stop/pause/resume/cancel_all)与危险应对策略(set_policy/get_policy)。
+    private static ToolDefinition.ToolResult behaviorControl(AIPlayerEntity bot, JsonObject args) {
+        String action = requiredString(args, "action").toLowerCase(java.util.Locale.ROOT);
+        return switch (action) {
+            case "stop" -> {
+                IntentControlTransaction.Outcome outcome = IntentController.INSTANCE.cancelCurrent(
+                        bot, IntentController.ControlOrigin.LLM_TOOL, "tool_behavior_control_stop");
+                yield ok(outcome.changed() ? "cancelled_current" : "already_idle");
+            }
+            case "pause" -> {
+                boolean changed = IntentController.INSTANCE.pause(
+                        bot, IntentController.ControlOrigin.LLM_TOOL, "tool_behavior_control_pause");
+                yield ok(changed ? "mission_paused" : "already_paused");
+            }
+            case "resume" -> resumeWork(bot);
+            case "cancel_all" -> {
+                IntentControlTransaction.Outcome outcome = IntentController.INSTANCE.cancelAll(
+                        bot, IntentController.ControlOrigin.LLM_TOOL, "tool_behavior_control_cancel_all");
+                yield ok(outcome.changed() ? "cancelled_all" : "already_idle");
+            }
+            case "get_policy" -> ok(DangerPolicyStore.INSTANCE.describe(bot.getUuid()));
+            case "set_policy" -> setDangerPolicy(bot, args);
+            default -> throw new IllegalArgumentException(
+                    "unknown_action: " + action + " (want stop|pause|resume|cancel_all|set_policy|get_policy)");
+        };
+    }
+
+    /**
+     * 继续被打断的工作。两条路径:
+     * ① 用户暂停(userPaused 锁)→ 走 IntentController 解锁并弹栈;
+     * ② 打断暂停(威胁/死亡压栈)→ 无活跃任务时显式弹栈继续;有活跃任务(多半是危险应对)时
+     *    不抢——威胁暂停的工作本来就会自动接续,死亡打断的工作必须等危险应对结束后再 resume。
+     */
+    private static ToolDefinition.ToolResult resumeWork(AIPlayerEntity bot) {
+        if (TaskManager.INSTANCE.isUserPaused(bot)) {
+            boolean changed = IntentController.INSTANCE.resume(
+                    bot, IntentController.ControlOrigin.LLM_TOOL, "tool_behavior_control_resume");
+            return ok(changed ? "mission_resumed" : "not_paused");
+        }
+        if (TaskManager.INSTANCE.getActive(bot).isPresent()) {
+            return fail("cannot_resume_now: 有任务正在执行(若是危险应对,被打断的工作会在其结束后自动继续;"
+                    + "死亡打断的工作请在它结束后再调 resume,或现在用 stop 放弃被打断的工作)");
+        }
+        if (TaskManager.INSTANCE.hasPaused(bot)) {
+            return TaskManager.INSTANCE.resumeExplicit(bot)
+                    ? ok("mission_resumed: 被打断的工作已继续")
+                    : ok("not_paused");
+        }
+        return ok("not_paused");
+    }
+
+    /** 任务类工具的统一结果映射:PAUSED(被打断)→ paused 状态 + 继续/放弃指引,不再是笼统的 failed。 */
+    private static ToolDefinition.ToolResult fromTaskStatus(TaskStatus status) {
+        if (status.state() == TaskState.COMPLETED) {
+            return ok(status.description());
+        }
+        if (status.state() == TaskState.PAUSED) {
+            return ToolDefinition.ToolResult.paused(interruptGuidance(status));
+        }
+        return fail(status.failureReason() != null && !status.failureReason().isBlank()
+                ? status.failureReason() : "failed");
+    }
+
+    private static String interruptGuidance(TaskStatus status) {
+        String reason = status.failureReason() == null ? "" : status.failureReason();
+        if (reason.contains("bot_died")) {
+            return "work_interrupted: bot died and respawned. \"" + status.name()
+                    + "\" is paused with its progress kept. Call behavior_control action=resume to continue it"
+                    + " (after any ongoing danger response finishes), or action=stop to abandon it.";
+        }
+        if (reason.startsWith("user_pause")) {
+            return "work_paused_by_user: \"" + status.name()
+                    + "\" is paused with its progress kept. Call behavior_control action=resume to continue it,"
+                    + " or action=stop to abandon it.";
+        }
+        return "work_interrupted: " + reason + ". \"" + status.name()
+                + "\" is paused with its progress kept and will auto-resume after the danger passes."
+                + " You may also call behavior_control action=resume to continue it yourself,"
+                + " or action=stop to abandon it.";
+    }
+
+    private static ToolDefinition.ToolResult setDangerPolicy(AIPlayerEntity bot, JsonObject args) {
+        String rawMode = optionalString(args, "mode", "");
+        DangerPolicy.Mode mode = rawMode.isEmpty() ? null : DangerPolicy.parseMode(rawMode);
+        Integer retreatHp = args.has("retreat_hp") && args.get("retreat_hp").isJsonPrimitive()
+                ? DangerPolicy.validateRetreatHp(args.get("retreat_hp").getAsInt()) : null;
+        Integer maxEnemies = args.has("max_enemies") && args.get("max_enemies").isJsonPrimitive()
+                ? DangerPolicy.validateMaxEnemies(args.get("max_enemies").getAsInt()) : null;
+        Boolean keepSurvival = args.has("keep_survival") && args.get("keep_survival").isJsonPrimitive()
+                ? args.get("keep_survival").getAsBoolean() : null;
+        Map<String, String> mobReactions = mobReactionsDelta(args);
+        boolean resetMobReactions = optionalBoolean(args, "reset_mob_reactions", false);
+        // mode=auto 且其余全省略 = 显式重置回默认(删条目+存档键);否则增量合并
+        DangerPolicy policy = (mode == DangerPolicy.Mode.AUTO && retreatHp == null && maxEnemies == null
+                && keepSurvival == null && mobReactions == null && !resetMobReactions)
+                ? DangerPolicyStore.INSTANCE.reset(bot.getUuid())
+                : DangerPolicyStore.INSTANCE.update(bot.getUuid(), mode, retreatHp, maxEnemies, keepSurvival,
+                        mobReactions, resetMobReactions);
+        BotLog.danger(bot, "danger_policy_changed",
+                "mode", policy.mode(),
+                "retreat_hp", policy.retreatHp(),
+                "max_enemies", policy.maxEnemies(),
+                "keep_survival", policy.keepSurvival(),
+                "mob_reactions", policy.mobReactions());
+        String description = DangerPolicyStore.INSTANCE.describe(bot.getUuid());
+        BrainCoordinator.INSTANCE.sendPanelChat(bot, "system",
+                bot.getGameProfile().getName() + " 的危险应对策略已更新: " + description);
+        return ok("danger_policy_set: " + description);
+    }
+
+    // 解析 mob_reactions 增量:实体 id 必须在注册表存在;反应值 fight/flee/ignore,或 "auto"=删除该怪规则。
+    // 未传该字段返回 null(= 不动 per-怪规则)。
+    private static Map<String, String> mobReactionsDelta(JsonObject args) {
+        if (!args.has("mob_reactions") || !args.get("mob_reactions").isJsonObject()) {
+            return null;
+        }
+        Map<String, String> delta = new LinkedHashMap<>();
+        for (Map.Entry<String, com.google.gson.JsonElement> entry : args.getAsJsonObject("mob_reactions").entrySet()) {
+            if (!entry.getValue().isJsonPrimitive()) {
+                throw new IllegalArgumentException("missing_or_bad_arg: mob_reactions." + entry.getKey());
+            }
+            Identifier id = Identifier.of(entry.getKey().trim());
+            if (Registries.ENTITY_TYPE.getOptionalValue(id).isEmpty()) {
+                throw new IllegalArgumentException("unknown_entity_type: " + id);
+            }
+            String reaction = entry.getValue().getAsString().trim().toLowerCase(java.util.Locale.ROOT);
+            if (!DangerPolicy.REACTION_REMOVE.equals(reaction)) {
+                DangerPolicy.Reaction.parse(reaction); // 校验,非法值抛 unknown_mob_reaction
+            }
+            delta.put(id.toString(), reaction);
+        }
+        return delta;
+    }
+
     private static ToolDefinition.ToolResult fail(String message) {
         return ToolDefinition.ToolResult.failure(message);
     }
@@ -1179,17 +1271,14 @@ public final class ToolRegistry {
         TaskManager.INSTANCE.assign(bot, task, TaskOrigin.of(TaskOrigin.Kind.LLM_TOOL, "llm_tool"));
     }
 
-    /** 为任务类工具创建异步 handler：启动任务 → 等待完成 → 返回真实结果。 */
+    /** 为任务类工具创建异步 handler：启动任务 → 等待完成 → 返回真实结果(被打断时返回 paused + 指引)。 */
     private static ToolDefinition.AsyncHandler taskAsyncHandler(java.util.function.Function<JsonObject, Task> taskFactory) {
         return (bot, args) -> {
             CompletableFuture<ToolDefinition.ToolResult> future = new CompletableFuture<>();
             CompletableFuture<TaskStatus> taskFuture = TaskManager.INSTANCE.whenComplete(bot);
             Task task = taskFactory.apply(args);
             assignLlm(bot, task);
-            taskFuture.thenAccept(status ->
-                future.complete(status.state() == TaskState.COMPLETED
-                    ? ok(status.description())
-                    : fail(status.failureReason() != null ? status.failureReason() : "failed")));
+            taskFuture.thenAccept(status -> future.complete(fromTaskStatus(status)));
             return future;
         };
     }
@@ -1484,6 +1573,23 @@ public final class ToolRegistry {
         JsonObject schema = new JsonObject();
         schema.addProperty("type", "boolean");
         schema.addProperty("description", description);
+        return schema;
+    }
+
+    private static JsonObject mobReactionsSchema() {
+        JsonObject schema = new JsonObject();
+        schema.addProperty("type", "object");
+        schema.addProperty("description",
+                "map of entity id (e.g. minecraft:creeper) to reaction: fight, flee, ignore, or auto (removes the rule)");
+        JsonObject additional = new JsonObject();
+        additional.addProperty("type", "string");
+        com.google.gson.JsonArray values = new com.google.gson.JsonArray();
+        values.add("fight");
+        values.add("flee");
+        values.add("ignore");
+        values.add("auto");
+        additional.add("enum", values);
+        schema.add("additionalProperties", additional);
         return schema;
     }
 

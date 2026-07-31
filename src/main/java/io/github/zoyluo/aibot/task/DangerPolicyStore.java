@@ -20,7 +20,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 每 bot 危险应对策略存储(LLM 经 set_danger_policy 工具设置)。
+ * 每 bot 危险应对策略存储(LLM 经 behavior_control 工具设置)。
  * 内存 ConcurrentHashMap,改动即落盘(world 存档 aibot/danger_policies.json,原子写),服务器启动整体加载。
  * 未设字段经 {@link #resolve} 逐层回落 AIBotConfig.combat() 默认值——原配置即默认配置。
  * 生命周期挂 RuntimeLifecycleCoordinator(attach/detach/clear/forget/clearAll),同 KnowledgeBase 模式。
@@ -33,8 +33,18 @@ public final class DangerPolicyStore {
     private static final int CURRENT_SCHEMA = 1;
     private static final String FILE_NAME = "danger_policies.json";
 
-    /** resolve 后的有效值(无 null):per-bot 覆盖 → AIBotConfig.combat() 默认。 */
-    public record Effective(DangerPolicy.Mode mode, int retreatHp, int maxEnemies, boolean keepSurvival) {
+    /** resolve 后的有效值(无 null):per-bot 覆盖 → AIBotConfig.combat() 默认;mobReactions 无配置默认,空表=无规则。 */
+    public record Effective(DangerPolicy.Mode mode, int retreatHp, int maxEnemies, boolean keepSurvival,
+                            Map<String, String> mobReactions) {
+
+        /** 该实体类型的 per-怪反应;无规则返回 null(按全局 mode 走)。 */
+        public DangerPolicy.Reaction reactionFor(net.minecraft.entity.EntityType<?> type) {
+            if (type == null || mobReactions.isEmpty()) {
+                return null;
+            }
+            String raw = mobReactions.get(net.minecraft.registry.Registries.ENTITY_TYPE.getId(type).toString());
+            return raw == null ? null : DangerPolicy.Reaction.parse(raw);
+        }
     }
 
     // 磁盘格式:{ "schema":1, "policies": { "<uuid>": { "mode":"FIGHT", "retreatHp":14, "keepSurvival":false } } }
@@ -62,18 +72,21 @@ public final class DangerPolicyStore {
                 policy.mode() == null ? DangerPolicy.Mode.AUTO : policy.mode(),
                 policy.retreatHp() == null ? combat.retreatHp() : policy.retreatHp(),
                 policy.maxEnemies() == null ? combat.maxEnemiesToFight() : policy.maxEnemies(),
-                policy.keepSurvival() == null || policy.keepSurvival());
+                policy.keepSurvival() == null || policy.keepSurvival(),
+                policy.mobReactions() == null ? Map.of() : Map.copyOf(policy.mobReactions()));
     }
 
-    /** 原始策略条目(get_danger_policy 标注字段来源用);无覆盖时返回 null。 */
+    /** 原始策略条目(behavior_control get_policy 标注字段来源用);无覆盖时返回 null。 */
     public DangerPolicy raw(UUID botId) {
         return policies.get(botId);
     }
 
-    /** 增量更新;null 参数="不改该字段"。结果与默认等价则删条目。返回合并后的策略(可能是 DEFAULT)。 */
-    public DangerPolicy update(UUID botId, DangerPolicy.Mode mode, Integer retreatHp, Integer maxEnemies, Boolean keepSurvival) {
+    /** 增量更新;null 参数="不改该字段"。mobReactionsDelta 值 "auto"=删除该怪规则;resetMobReactions=先清空。
+     *  结果与默认等价则删条目。返回合并后的策略(可能是 DEFAULT)。 */
+    public DangerPolicy update(UUID botId, DangerPolicy.Mode mode, Integer retreatHp, Integer maxEnemies,
+                               Boolean keepSurvival, Map<String, String> mobReactionsDelta, boolean resetMobReactions) {
         DangerPolicy merged = policies.getOrDefault(botId, DangerPolicy.DEFAULT)
-                .mergedWith(mode, retreatHp, maxEnemies, keepSurvival);
+                .mergedWith(mode, retreatHp, maxEnemies, keepSurvival, mobReactionsDelta, resetMobReactions);
         if (merged.isDefault()) {
             policies.remove(botId);
         } else {
@@ -90,10 +103,20 @@ public final class DangerPolicyStore {
         return DangerPolicy.DEFAULT;
     }
 
-    /** 有效策略描述(get_danger_policy 用):JSON,每字段附来源 policy/config/default。 */
+    /** 有效策略描述(behavior_control get_policy 用):JSON,每字段附来源 policy/config/default。 */
     public String describe(UUID botId) {
         DangerPolicy policy = policies.get(botId);
         Effective effective = resolve(botId);
+        StringBuilder mobReactions = new StringBuilder("{");
+        boolean first = true;
+        for (Map.Entry<String, String> entry : effective.mobReactions().entrySet()) {
+            if (!first) {
+                mobReactions.append(",");
+            }
+            first = false;
+            mobReactions.append("\"").append(entry.getKey()).append("\":\"").append(entry.getValue()).append("\"");
+        }
+        mobReactions.append("}");
         return "{\"mode\":\"" + effective.mode().name().toLowerCase(Locale.ROOT)
                 + "\",\"mode_source\":\"" + (policy != null && policy.mode() != null ? "policy" : "default")
                 + "\",\"retreat_hp\":" + effective.retreatHp()
@@ -102,7 +125,8 @@ public final class DangerPolicyStore {
                 + ",\"max_enemies_source\":\"" + (policy != null && policy.maxEnemies() != null ? "policy" : "config")
                 + "\",\"keep_survival\":" + effective.keepSurvival()
                 + ",\"keep_survival_source\":\"" + (policy != null && policy.keepSurvival() != null ? "policy" : "default")
-                + "\"}";
+                + "\",\"mob_reactions\":" + mobReactions
+                + "}";
     }
 
     // ==================== 生命周期 ====================

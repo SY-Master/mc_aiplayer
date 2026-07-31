@@ -3,6 +3,7 @@ package io.github.zoyluo.aibot.mode;
 import io.github.zoyluo.aibot.AIBotConfig;
 import io.github.zoyluo.aibot.entity.AIPlayerEntity;
 import io.github.zoyluo.aibot.log.BotLog;
+import io.github.zoyluo.aibot.log.LogCategory;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -31,7 +32,7 @@ public final class CapabilityRuntime {
                 || (capability == PrivilegedCapability.EMERGENCY_TELEPORT && decision.allowed());
         if (alwaysAudit || next == null || now >= next) {
             NEXT_LOG_TICK.put(key, now + REPEATED_DECISION_LOG_INTERVAL);
-            BotLog.action(bot, "capability_decision",
+            BotLog.raw(LogCategory.ACTION, org.slf4j.event.Level.DEBUG, bot, "capability_decision", null,
                     "profile", decision.profile().configValue(),
                     "capability", decision.capability(),
                     "allowed", decision.allowed(),

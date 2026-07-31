@@ -410,6 +410,8 @@ public final class BrainCoordinator {
     }
 
     private void submit(AIPlayerEntity bot, BotConversation conversation, DecisionLease lease) {
+        BotLog.api(bot, "submit", "message", conversation.history.peekLast());
+
         try {
             List<ChatMessage> historySnapshot = MemoryStore.INSTANCE.prepareHistory(bot, List.copyOf(conversation.history));
             AIBotConfig.Brain brainConfig = AIBotConfig.get().brain();

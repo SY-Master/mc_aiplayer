@@ -81,7 +81,9 @@ public final class RuntimeLifecycleCoordinator {
         GoalExecutor.INSTANCE.clearQueue(bot);
         BotMemoryStore.INSTANCE.of(bot.getUuid()).clearGoal();
         IdleCoordinator.INSTANCE.cancelClaimedJob(bot, "bot_died");
-        TaskManager.INSTANCE.cancelIntentTasks(bot, "bot_died");
+        // 死亡打断不销毁工作:任务暂停压栈(仅显式恢复),等 LLM 决定继续还是放弃;
+        // 等待中的工具调用立即收到 paused 结果(含继续/放弃指引),而不是被静默取消。
+        TaskManager.INSTANCE.interruptForDeath(bot);
         bot.getActionPack().stopAll();
         BrainCoordinator.INSTANCE.softReset(bot);
         clearTransient(bot);

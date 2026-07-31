@@ -22,8 +22,7 @@ public final class ActionDispatcher {
             java.util.Set.of("move", "mine", "strip_mine");
     private static final int GOAL_FAIL_GUARD_TICKS = 600; // 30s
     private static final java.util.Set<String> USER_PAUSED_ALLOWED_TOOLS = java.util.Set.of(
-            "say", "get_task_status", "goal_status", "recall", "list_jobs", "pause", "resume", "stop", "cancel_all",
-            "set_danger_policy", "get_danger_policy",
+            "say", "get_task_status", "goal_status", "recall", "list_jobs", "behavior_control",
             // 这个队列是纯清单编辑(不动 bot 身体),暂停期间正好用来规划后续工作
             "todo_add", "todo_list", "todo_update", "todo_remove", "todo_clear");
 
@@ -110,7 +109,7 @@ public final class ActionDispatcher {
                 break;
             }
             if (result.isSuccess()) {
-                controlEffect = controlEffect.merge(effectOf(call.name()));
+                controlEffect = controlEffect.merge(effectOf(call));
             }
             BotLog.action(bot, "tool_result", "tool", call.name(), "status", result.status().label(), "message", result.message());
             results.add(ChatMessage.toolResult(call.id(), result.toToolContent()));
@@ -180,9 +179,23 @@ public final class ActionDispatcher {
         return false;
     }
 
-    private static ControlEffect effectOf(String toolName) {
-        return switch (toolName) {
-            case "stop", "abort_task" -> ControlEffect.CANCEL_CURRENT;
+    private static ControlEffect effectOf(ChatToolCall call) {
+        if (!"behavior_control".equals(call.name())) {
+            return ControlEffect.NONE;
+        }
+        // 整合工具的控制语义藏在 action 参数里:stop/cancel_all 需要保留当前 APPLYING lease,
+        // 与原独立 stop/cancel_all 工具同款 ControlEffect 处理。
+        String action = "";
+        try {
+            JsonObject args = call.parsedArguments();
+            if (args != null && args.has("action") && args.get("action").isJsonPrimitive()) {
+                action = args.get("action").getAsString();
+            }
+        } catch (RuntimeException ignored) {
+            // 参数解析异常 → 当作无控制效果,工具本身会报 bad_arg
+        }
+        return switch (action) {
+            case "stop" -> ControlEffect.CANCEL_CURRENT;
             case "cancel_all" -> ControlEffect.CANCEL_ALL;
             default -> ControlEffect.NONE;
         };

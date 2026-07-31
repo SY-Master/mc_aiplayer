@@ -111,10 +111,10 @@ public final class DangerWatcher {
             }
             return true;
         }
-        Optional<Threat> threat = collectTopThreat(bot);
-        Optional<Task> active = TaskManager.INSTANCE.getActive(bot);
-        // 策略层:LLM 经 set_danger_policy 设置的 per-bot 危险应对策略(未设字段回落 AIBotConfig 默认)。
+        // 策略层:LLM 经 behavior_control 设置的 per-bot 危险应对策略(未设字段回落 AIBotConfig 默认)。
         DangerPolicyStore.Effective policy = DangerPolicyStore.INSTANCE.resolve(bot);
+        Optional<Threat> threat = collectTopThreat(bot, policy);
+        Optional<Task> active = TaskManager.INSTANCE.getActive(bot);
         // 入浆即自救(最高优先,压倒威胁):岩浆每 tick 烧 4,几秒就死。SurvivalGuard 只中断作业、注释说
         // "让位 DangerWatcher 脱困"但从未实现——bot 泡在岩浆里被烧死(real_diamond 下潜挖穿岩浆袋,14/15 步功亏一篑)。
         // 这里补上:身陷岩浆且当前不是逃浆任务 → 立即派 LavaEscapeTask,把命先捞回来。
@@ -158,13 +158,19 @@ public final class DangerWatcher {
         }
         // mode=OFF:LLM 明确关闭自主怪物应对 → 威胁派发整段跳过(含 trappedBackoff/冷却记账),
         // 当前作业(采集/挖矿…)不被打断。死亡复活、黑暗撤离不属此闸,不受 OFF 影响。
-        if (threat.isPresent() && policy.mode() != DangerPolicy.Mode.OFF) {
+        // 例外:top 威胁带 per-怪规则(mob_reactions)时规则比 mode 更具体,OFF 也不拦该怪的应对。
+        boolean offBlocksThreat = policy.mode() == DangerPolicy.Mode.OFF
+                && (threat.isEmpty() || threat.get().type() != Threat.Type.HOSTILE
+                    || policy.reactionFor(threat.get().entity() == null ? null : threat.get().entity().getType()) == null);
+        if (threat.isPresent() && !offBlocksThreat) {
             Threat top = threat.get();
             // 逃跑失败即反击:evade 刚失败(无处可逃/超时)且威胁还在 → 立即反打,不等威胁冷却、不看 canFight 闸。
             // 旧逻辑失败后进 80t 冷却干挨打,没武器时永远进不了战斗,"卡在那不动"被活活磨死。绝境没得算,空手也打。
             // 濒死(≤4心)有方块由上面的封墙闸兜(它无视冷却);FLEE 是明确不战姿态,不升级,走常规再逃/退避求助。
+            // per-怪 FLEE(mob_reactions)同样是明确不战姿态,与全局 FLEE 同等对待。
             if (top.type() == Threat.Type.HOSTILE && top.entity() != null
                     && policy.mode() != DangerPolicy.Mode.FLEE
+                    && policy.reactionFor(top.entity().getType()) != DangerPolicy.Reaction.FLEE
                     && evadeJustFailed(bot)) {
                 TaskManager.INSTANCE.consumeFailure(bot);
                 if (active.isPresent()) {
@@ -354,15 +360,31 @@ public final class DangerWatcher {
     }
 
     private Task decideCombatOrEvade(AIPlayerEntity bot, Threat threat, DangerPolicyStore.Effective policy) {
-        // 策略层(LLM set_danger_policy):
-        //  FIGHT=主战——canFightForced 去掉 maxEnemies 数量闸(LLM 明确要打群架也奉陪),武器/血量/苦力怕闸保留;
+        // 策略层(LLM behavior_control):
+        //  per-怪规则(mob_reactions)最具体,优先于全局 mode:
+        //   FIGHT=遇该怪主战——血量/武器闸保留,忽略 maxEnemies 数量闸与苦力怕近战保护(显式指令,责任自负);
+        //   FLEE=遇该怪绝不接战;IGNORE 到不了这里(collectTopThreat 已滤)。
+        //  无 per-怪规则按 mode:FIGHT=主战(canFightForced 去掉数量闸,武器/血量/苦力怕闸保留);
         //  FLEE=永不接战;AUTO=原启发式(数量上限按策略值)。OFF 到不了这里(威胁闸已拦)。
         // combat 困死(连续 stuck 中止=目标够不到)任何模式都改逃,别撞墙等死。
-        boolean fight = switch (policy.mode()) {
-            case FIGHT -> canFightForced(bot, threat, policy) && !combatStuck(bot);
-            case FLEE, OFF -> false;
-            default -> canFight(bot, threat, policy) && !combatStuck(bot);
-        };
+        DangerPolicy.Reaction reaction = threat.type() == Threat.Type.HOSTILE && threat.entity() != null
+                ? policy.reactionFor(threat.entity().getType())
+                : null;
+        boolean fight;
+        if (reaction == DangerPolicy.Reaction.FIGHT) {
+            fight = threat.entity().isAlive()
+                    && bot.getHealth() > policy.retreatHp()
+                    && EquipAction.bestWeaponSlot(bot).isPresent()
+                    && !combatStuck(bot);
+        } else if (reaction == DangerPolicy.Reaction.FLEE) {
+            fight = false;
+        } else {
+            fight = switch (policy.mode()) {
+                case FIGHT -> canFightForced(bot, threat, policy) && !combatStuck(bot);
+                case FLEE, OFF -> false;
+                default -> canFight(bot, threat, policy) && !combatStuck(bot);
+            };
+        }
         if (fight) {
             return new CombatTask(threat.entity().getType(), 1, policy.retreatHp());
         }
@@ -395,6 +417,7 @@ public final class DangerWatcher {
         // evade 目标算出原地 1t 完成,backoff 停发威胁任务后被围殴致死)。canFight 的武器/数量闸
         // 是"打得划算吗"的算计,绝境没得算:空手也开打,伤害换活命窗口。
         // FLEE/OFF 是 LLM 的明确姿态,绝境也不越权反击——只走退避+节流求助(复活兜底永远在)。
+        // per-怪 FLEE/IGNORE(mob_reactions)的怪同样不选作反击目标。
         if (repeat >= 2 && bot.hurtTime > 0
                 && policy.mode() != DangerPolicy.Mode.FLEE && policy.mode() != DangerPolicy.Mode.OFF) {
             trapRecords.remove(bot.getUuid());
@@ -402,6 +425,10 @@ public final class DangerWatcher {
                     net.minecraft.entity.mob.HostileEntity.class,
                     bot.getBoundingBox().expand(4.0D), e -> e.isAlive())
                     .stream()
+                    .filter(e -> {
+                        DangerPolicy.Reaction reaction = policy.reactionFor(e.getType());
+                        return reaction != DangerPolicy.Reaction.FLEE && reaction != DangerPolicy.Reaction.IGNORE;
+                    })
                     .filter(e -> io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveEntity(bot, e))
                     .findFirst().orElse(null);
             if (hostile != null) {
@@ -605,6 +632,7 @@ public final class DangerWatcher {
                 .getEntitiesByClass(LivingEntity.class, bot.getBoundingBox().expand(8.0D),
                         entity -> entity instanceof HostileEntity && entity.isAlive())
                 .stream()
+                .filter(entity -> policy.reactionFor(entity.getType()) != DangerPolicy.Reaction.IGNORE) // IGNORE 的怪不占数量闸
                 .filter(entity -> io.github.zoyluo.aibot.mode.ObservableWorldQuery.canObserveEntity(bot, entity))
                 .toList().size();
         return hostiles <= policy.maxEnemies() && EquipAction.bestWeaponSlot(bot).isPresent();
@@ -669,16 +697,18 @@ public final class DangerWatcher {
         return max - stack.getDamage() <= max * 0.10D;
     }
 
-    private static Optional<Threat> collectTopThreat(AIPlayerEntity bot) {
+    private static Optional<Threat> collectTopThreat(AIPlayerEntity bot, DangerPolicyStore.Effective policy) {
         if (bot.getHealth() < 6.0F) {
             return Optional.of(new Threat(Threat.Type.LOW_HP, Threat.Severity.HIGH, null, bot.getBlockPos()));
         }
         // 规避加固:检测半径 10,但只把"能真正威胁到 bot"的敌对怪算进来——bot 眼睛到怪眼睛之间若被实心
         // 方块阻隔(隔着墙/在另一条隧道),怪根本够不到 bot,不应触发战斗/逃跑(实测 bug:被方块挡着的怪
         // 让 bot 一直"正在战斗"、中断正常挖矿)。按距离从近到远找第一个有视线(可达)的怪。
+        // per-怪 IGNORE(mob_reactions)的怪整段跳过:当它不存在,也不遮蔽后面的威胁评估。
         List<LivingEntity> hostiles = bot.getServerWorld()
                 .getEntitiesByClass(LivingEntity.class, bot.getBoundingBox().expand(10.0D),
                         entity -> entity instanceof HostileEntity && entity.isAlive()
+                                && policy.reactionFor(entity.getType()) != DangerPolicy.Reaction.IGNORE
                                 && ObservableWorldQuery.canObserveEntity(bot, entity));
         hostiles.sort(Comparator.comparingDouble(bot::distanceTo));
         for (LivingEntity mob : hostiles) {

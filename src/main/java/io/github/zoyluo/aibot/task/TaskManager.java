@@ -204,6 +204,17 @@ public final class TaskManager {
     }
 
     public void pauseFor(AIPlayerEntity bot, String why) {
+        pauseFor(bot, why, false);
+    }
+
+    /**
+     * 暂停当前任务压栈。等待该任务的工具 future 立即以 PAUSED 状态完成(带上打断原因),
+     * 让 LLM 马上知道"工作被打断了",而不是等下一个无关任务结束时被错填结果。
+     *
+     * @param explicitResumeOnly true = 该帧只能被显式 resume(LLM behavior_control action=resume)弹栈,
+     *                           系统自动恢复跳过;用于死亡打断。false = 危险解除后自动恢复(威胁暂停)。
+     */
+    public void pauseFor(AIPlayerEntity bot, String why, boolean explicitResumeOnly) {
         UUID uuid = bot.getUuid();
         Task current = active.remove(uuid);
         TaskOrigin origin = activeOrigins.remove(uuid);
@@ -211,15 +222,59 @@ public final class TaskManager {
             return;
         }
         current.pause(bot);
+        if (current instanceof AbstractTask at) {
+            at.failureReason = why; // 暂停原因透传给工具结果(PAUSED 状态的 message 要用)
+        }
         TaskOrigin preservedOrigin = origin == null
                 ? TaskOrigin.of(TaskOrigin.Kind.SYSTEM_BACKGROUND, "unknown_origin") : origin;
         ExecutionStack<Task> stack = executionStacks.computeIfAbsent(uuid, ignored -> new ExecutionStack<>());
-        stack.push(current, preservedOrigin);
+        stack.push(current, preservedOrigin, explicitResumeOnly);
         TaskStatus status = TaskStatus.from(current);
         lastStatus.put(bot.getUuid(), status);
         BotReporter.INSTANCE.onStatus(bot.getServer(), bot, status);
+        completeFuture(uuid, status); // 打断即通知:等待中的 LLM 工具立刻收到 paused 结果
         BotLog.task(bot, "task_paused", "name", current.name(), "why", why,
-                "origin", preservedOrigin.kind(), "stack_depth", stack.size());
+                "origin", preservedOrigin.kind(), "stack_depth", stack.size(),
+                "explicit_resume_only", explicitResumeOnly);
+    }
+
+    /**
+     * 死亡打断:不销毁工作——活跃任务暂停压栈并标记"仅显式恢复"(整条已暂停链同样标记),
+     * 等 LLM 决定继续(behavior_control action=resume)还是放弃(action=stop)。
+     * 等待中的工具 future 以 PAUSED 状态完成,不再是 cancelIntentTasks 的直接取消。
+     */
+    public void interruptForDeath(AIPlayerEntity bot) {
+        UUID uuid = bot.getUuid();
+        Task current = active.remove(uuid);
+        TaskOrigin origin = activeOrigins.remove(uuid);
+        ExecutionStack<Task> stack = executionStacks.get(uuid);
+        if (stack != null) {
+            stack.markAllExplicitResumeOnly();
+        }
+        userPaused.remove(uuid);
+        lastFailure.remove(uuid);
+        pendingFailure.remove(uuid);
+        if (current == null || current.state() != TaskState.RUNNING) {
+            cancelFutures(uuid); // 没有在跑的任务,不该有等任务的 future;防御性清掉
+            if (current != null) {
+                lastStatus.put(uuid, TaskStatus.from(current));
+            }
+            return;
+        }
+        current.pause(bot);
+        if (current instanceof AbstractTask at) {
+            at.failureReason = "bot_died";
+        }
+        TaskOrigin preservedOrigin = origin == null
+                ? TaskOrigin.of(TaskOrigin.Kind.SYSTEM_BACKGROUND, "unknown_origin") : origin;
+        executionStacks.computeIfAbsent(uuid, ignored -> new ExecutionStack<>())
+                .push(current, preservedOrigin, true);
+        TaskStatus status = TaskStatus.from(current);
+        lastStatus.put(uuid, status);
+        BotReporter.INSTANCE.onStatus(bot.getServer(), bot, status);
+        completeFuture(uuid, status);
+        BotLog.task(bot, "task_interrupted_by_death", "name", current.name(),
+                "stack_depth", pausedDepth(bot));
     }
 
     public void resumeFromPause(AIPlayerEntity bot) {
@@ -235,19 +290,49 @@ public final class TaskManager {
         if (resumable.isEmpty()) {
             return;
         }
-        ExecutionStack.Frame<Task> frame = resumable.get();
+        resumeFrame(bot, stack, resumable.get(), false);
+    }
+
+    /**
+     * 显式恢复栈顶被打断的工作(LLM behavior_control action=resume)。
+     * 不看 explicitResumeOnly 标记——LLM 明确点名要继续。userPaused 锁仍由 IntentController 路径先解。
+     *
+     * @return true = 有工作被恢复;false = 没有可恢复的(栈空或有活跃任务)
+     */
+    public boolean resumeExplicit(AIPlayerEntity bot) {
+        UUID uuid = bot.getUuid();
+        if (active.containsKey(uuid)) {
+            return false;
+        }
+        ExecutionStack<Task> stack = executionStacks.get(uuid);
+        if (stack == null) {
+            return false;
+        }
+        Optional<ExecutionStack.Frame<Task>> frame = stack.popExplicit();
+        if (frame.isEmpty()) {
+            return false;
+        }
+        resumeFrame(bot, stack, frame.get(), true);
+        return true;
+    }
+
+    private void resumeFrame(AIPlayerEntity bot, ExecutionStack<Task> stack, ExecutionStack.Frame<Task> frame, boolean explicit) {
+        UUID uuid = bot.getUuid();
         Task task = frame.work();
+        if (task instanceof AbstractTask at) {
+            at.failureReason = ""; // 清掉暂停原因,恢复后的 RUNNING 状态不带陈旧信息
+        }
         active.put(uuid, task);
         activeOrigins.put(uuid, frame.origin());
         task.resume(bot);
         TaskStatus status = TaskStatus.from(task);
-        lastStatus.put(bot.getUuid(), status);
+        lastStatus.put(uuid, status);
         BotReporter.INSTANCE.onStatus(bot.getServer(), bot, status);
         if (stack.isEmpty()) {
             executionStacks.remove(uuid, stack);
         }
         BotLog.task(bot, "task_resumed", "name", task.name(), "origin", frame.origin().kind(),
-                "stack_depth", stack.size(), "user_paused", userPaused.contains(uuid));
+                "stack_depth", stack.size(), "user_paused", userPaused.contains(uuid), "explicit", explicit);
     }
 
     public boolean pauseUserIntent(AIPlayerEntity bot, String why) {

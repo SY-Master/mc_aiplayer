@@ -33,7 +33,7 @@ public final class SurvivalGuard {
                 || task instanceof LavaEscapeTask) {
             return null; // LavaEscapeTask 是入浆自救本身,绝不能被 guard_in_lava 反过来打断
         }
-        // 策略层:LLM 经 set_danger_policy 关掉环境保命(keep_survival=false)→ 熔断全部失效,
+        // 策略层:LLM 经 behavior_control 关掉环境保命(keep_survival=false)→ 熔断全部失效,
         // 作业不被叫停,代价(可能淹死/烧死)是工具约定语义。NavSafetyNet 的位置矫正自救不受此开关影响。
         if (!DangerPolicyStore.INSTANCE.resolve(bot).keepSurvival()) {
             return null;

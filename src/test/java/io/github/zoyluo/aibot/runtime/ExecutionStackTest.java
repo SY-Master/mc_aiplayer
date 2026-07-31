@@ -40,4 +40,28 @@ class ExecutionStackTest {
         assertEquals(java.util.List.of("lava", "combat", "mission"),
                 stack.drain().stream().map(ExecutionStack.Frame::work).toList());
     }
+
+    @Test
+    void explicitResumeOnlyFrameSkipsAutoResumeButPopsExplicitly() {
+        ExecutionStack<String> stack = new ExecutionStack<>();
+        stack.push("mission", TaskOrigin.mission(UUID.randomUUID(), "mine"), true);
+
+        assertTrue(stack.popResumable(false).isEmpty()); // 自动恢复跳过
+        assertEquals(1, stack.size());
+        assertEquals("mission", stack.popExplicit().orElseThrow().work()); // 显式 resume 弹栈
+        assertTrue(stack.isEmpty());
+    }
+
+    @Test
+    void markAllExplicitResumeOnlyPreservesOrderAndBlocksAutoResume() {
+        ExecutionStack<String> stack = new ExecutionStack<>();
+        stack.push("mission", TaskOrigin.mission(UUID.randomUUID(), "mine"));
+        stack.push("evade", TaskOrigin.safety("evade"));
+
+        stack.markAllExplicitResumeOnly();
+        assertTrue(stack.popResumable(false).isEmpty()); // 整条链都不自动接续
+        assertEquals("evade", stack.popExplicit().orElseThrow().work()); // 顺序不变:顶→底
+        assertEquals("mission", stack.popExplicit().orElseThrow().work());
+        assertTrue(stack.isEmpty());
+    }
 }

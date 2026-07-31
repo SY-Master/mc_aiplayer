@@ -11,6 +11,30 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 
+/**
+ * 直线行走控制器：按 tick 驱动 bot 沿水平方向径直走向目标点（无寻路、不绕障，走不到由自身判定失败）。
+ * 由 {@link ActionPack#startWalkTo(Vec3d)} 创建、{@link ActionPack} 每 tick 推进（见其 tickWalkTo），
+ * 结果经 {@link ActionResult} 返回：到达（水平距离 ≤ 0.6）返回 SUCCESS；超时（160 tick）、
+ * 硬卡死（stuck_hard）或绕行失败（stuck_blocked）返回 failed。
+ *
+ * <p>每 tick 依次做五件事：
+ * <ol>
+ *   <li>超时看门狗（160 tick）与到达判定（水平距离 ≤ 0.6）；</li>
+ *   <li>转向与前进：按目标方向（绕行模式下为偏转后的方向）经 {@link LookAction#lookHorizontallyAt}
+ *       只调水平朝向（看向行进方向 4 格处），前进输入恒为 1.0；</li>
+ *   <li>跳跃决策（shouldJump）：前方 jumpReach 处有碰撞且顶高 ≤ 1、头顶净空 → 上台阶；
+ *       碰撞更高 → 标记受阻（不跳也不疾跑）；前方为缺口且落点可站立 → 跳过缺口。
+ *       拟人化：仅在已落地时 {@link ActionPack#jumpOnce()} 点跳一次，绝不长按跳键；</li>
+ *   <li>疾跑决策（shouldSprint）：距离 ≥ sprintMinDist、未受阻、不在爬台阶（跨缺口允许）、
+ *       且前方 1、2 格处脚下与头顶碰撞形状均空时才疾跑；</li>
+ *   <li>卡死检测与横移绕行（sidle）：每 tick 位移 &lt; 0.04 累计无进展，达到 sidleAfter 后进入绕行——
+ *       每 8 tick 循环按 ±35°/±60° 偏转行进方向并加横移输入尝试蹭开障碍；绕行超过 sidleLimit 判 stuck_blocked；
+ *       位移 &lt; 0.005 累计硬卡死，超过 hardLimit 判 stuck_hard。</li>
+ * </ol>
+ *
+ * <p>可调阈值来自 {@link AIBotConfig.Nav}：jumpReach（跳跃前探距离）、sidleAfter/sidleLimit/hardLimit
+ * （绕行与卡死阈值）、sprintMinDist（最短疾跑距离）。卡死失败时经 logStuck 记录前方方块、朝向与目标便于排查。
+ */
 public final class WalkToController {
     private static final double ARRIVAL_THRESHOLD = 0.6D;
     private static final double PROGRESS_EPSILON = 0.04D;

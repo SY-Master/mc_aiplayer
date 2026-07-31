@@ -145,7 +145,7 @@ public final class DiagnosticLogger {
     }
 
     private void snapshot(AIPlayerEntity bot, Sample s) {
-        BotLog.action(bot, "diag_snapshot",
+        BotLog.raw(LogCategory.ACTION, org.slf4j.event.Level.DEBUG, bot, "diag_snapshot", null,
                 // —— 状态 ——
                 "pos", s.x + "," + s.y + "," + s.z,
                 "hp", fmt(s.health) + "/" + fmt(s.maxHealth),

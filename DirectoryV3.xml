@@ -183,7 +183,7 @@
      <tree path="/src/main/java/io/github/zoyluo/aibot/pathfinding/NeighborCandidate.java" title="邻居候选"/>
      <tree path="/src/main/java/io/github/zoyluo/aibot/pathfinding/NeighborEnumerator.java" title="邻居枚举器"/>
      <tree path="/src/main/java/io/github/zoyluo/aibot/pathfinding/Node.java" title="节点"/>
-     <tree path="/src/main/java/io/github/zoyluo/aibot/pathfinding/PathExecutor.java" title="路径执行器"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/pathfinding/PathExecutor.java" title="寻路执行器"/>
      <tree path="/src/main/java/io/github/zoyluo/aibot/pathfinding/PathfindingResult.java" title="寻路结果"/>
      <tree path="/src/main/java/io/github/zoyluo/aibot/pathfinding/Standability.java" title="可站立性"/>
 
@@ -249,7 +249,7 @@
      <tree path="/src/main/java/io/github/zoyluo/aibot/task/MilkCowTask.java" title="挤奶任务"/>
      <tree path="/src/main/java/io/github/zoyluo/aibot/task/MineTask.java" title="挖掘任务"/>
      <tree path="/src/main/java/io/github/zoyluo/aibot/task/MoveTask.java" title="移动任务"/>
-     <tree path="/src/main/java/io/github/zoyluo/aibot/task/NavSafetyNet.java" title="导航安全网"/>
+     <tree path="/src/main/java/io/github/zoyluo/aibot/task/NavSafetyNet.java" title="环境安全网"/>
      <tree path="/src/main/java/io/github/zoyluo/aibot/task/OreDigTask.java" title="矿石挖掘任务"/>
      <tree path="/src/main/java/io/github/zoyluo/aibot/task/PlaceStationsTask.java" title="放置工作站任务"/>
      <tree path="/src/main/java/io/github/zoyluo/aibot/task/RaidCropsTask.java" title="掠夺作物任务"/>
